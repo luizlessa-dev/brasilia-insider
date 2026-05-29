@@ -6,6 +6,10 @@ Uso:
   python -m ingestao.scheduler --dias 7
   python -m ingestao.scheduler --assembly almg --dias 30
   python -m ingestao.scheduler --health-check
+  python -m ingestao.scheduler --assembly alesp --no-persist   # fetch-only
+
+Persistência: grava no Supabase se SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+estiverem no ambiente. Sem elas (ou com --no-persist), roda em modo fetch-only.
 """
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ from datetime import date, timedelta
 
 from .base_connector import NotImplementedConnector, ConnectorError
 from .connectors import REGISTRY, get_connector, all_connectors
+from .persistence import SupabaseWriter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,9 +42,20 @@ def run_health_checks() -> None:
     print(f"\n{ok}/27 assembleias acessíveis\n")
 
 
-def run_ingestion(assembly_ids: list[str] | None, data_inicio: date, data_fim: date) -> None:
+def run_ingestion(
+    assembly_ids: list[str] | None,
+    data_inicio: date,
+    data_fim: date,
+    persist: bool = True,
+) -> None:
     targets = assembly_ids or list(REGISTRY.keys())
     resultados = {"ok": [], "stub": [], "erro": []}
+
+    writer = SupabaseWriter.from_env() if persist else None
+    if persist and writer is None:
+        logger.warning("Sem credenciais Supabase — rodando em modo fetch-only.")
+    elif not persist:
+        logger.info("Modo fetch-only (--no-persist): nada será gravado.")
 
     for aid in targets:
         try:
@@ -49,6 +65,11 @@ def run_ingestion(assembly_ids: list[str] | None, data_inicio: date, data_fim: d
             continue
 
         logger.info("▶ %s (%s)", connector.assembly_name, aid)
+        run_id = None
+        if writer:
+            writer.upsert_casa(connector)
+            run_id = writer.start_run(aid, data_inicio, data_fim)
+
         try:
             deps = connector.get_deputados()
             props = connector.get_proposicoes(data_inicio, data_fim)
@@ -57,18 +78,36 @@ def run_ingestion(assembly_ids: list[str] | None, data_inicio: date, data_fim: d
                 "  ✅ %d deputados | %d proposições | %d votações",
                 len(deps), len(props), len(vots),
             )
+
+            if writer:
+                writer.upsert_deputados(deps)
+                writer.upsert_proposicoes(props)
+                writer.upsert_votacoes(vots)
+                writer.finish_run(run_id, "ok", {
+                    "deputados": len(deps),
+                    "proposicoes": len(props),
+                    "votacoes": len(vots),
+                })
+                logger.info("  💾 gravado no Supabase")
+
             resultados["ok"].append(aid)
 
         except NotImplementedConnector:
             logger.info("  ⏳ %s — ainda não implementado (stub)", aid)
+            if writer:
+                writer.finish_run(run_id, "stub", {})
             resultados["stub"].append(aid)
 
         except ConnectorError as e:
             logger.warning("  ❌ %s — erro de conexão: %s", aid, e)
+            if writer:
+                writer.finish_run(run_id, "erro", {}, erro=str(e))
             resultados["erro"].append(aid)
 
         except Exception as e:
             logger.exception("  💥 %s — erro inesperado: %s", aid, e)
+            if writer:
+                writer.finish_run(run_id, "erro", {}, erro=str(e))
             resultados["erro"].append(aid)
 
     print(f"\n── Resumo ──────────────────────────────")
@@ -83,6 +122,7 @@ def main() -> None:
     parser.add_argument("--dias", type=int, default=7, help="Janela de ingestão em dias (default: 7)")
     parser.add_argument("--assembly", nargs="*", help="IDs específicos (ex: almg alep). Default: todos.")
     parser.add_argument("--health-check", action="store_true", help="Apenas verifica conectividade")
+    parser.add_argument("--no-persist", action="store_true", help="Fetch-only: não grava no banco")
     args = parser.parse_args()
 
     if args.health_check:
@@ -93,7 +133,7 @@ def main() -> None:
     data_inicio = data_fim - timedelta(days=args.dias)
     logger.info("Período: %s → %s", data_inicio, data_fim)
 
-    run_ingestion(args.assembly, data_inicio, data_fim)
+    run_ingestion(args.assembly, data_inicio, data_fim, persist=not args.no_persist)
 
 
 if __name__ == "__main__":

@@ -2,11 +2,17 @@
 ALMG — Assembleia Legislativa de Minas Gerais
 Tier 1 — REST API documentada em https://dadosabertos.almg.gov.br/
 
-Endpoints utilizados:
-  GET /ws/deputados/emExercicio          → lista de deputados
-  GET /ws/proposicoes?tp={tipo}&ano={ano}→ proposições por tipo/ano
-  GET /ws/proposicoes/{id}/votacoes      → votações de uma proposição
-  GET /ws/proposicoes/{id}/votacoes/{vid}→ detalhes de uma votação
+Endpoints:
+  GET /api/v2/deputados/em_exercicio     → lista de deputados  [VERIFICADO 200, 77 dep]
+  GET /api/v2/proposicoes/...            → proposições         [NÃO VERIFICADO — ver nota]
+  GET /api/v2/proposicoes/{id}/votacoes  → votações            [NÃO VERIFICADO — ver nota]
+
+NOTA (2026-05-28): a API de busca de proposições da ALMG v2 não responde nas
+rotas óbvias (/proposicoes 404, /proposicoes/pesquisa 403,
+/proposicoes/pesquisa/direcionada 400). get_proposicoes/get_votacoes ainda usam
+rotas especulativas e falham graciosamente (log warning, retorna []). Precisam
+ser mapeados contra a doc oficial da v2 antes de valerem como fonte. Só
+get_deputados está validado contra a API real.
 """
 from __future__ import annotations
 
@@ -21,7 +27,7 @@ class ALMGConnector(BaseConnector):
     assembly_name = "Assembleia Legislativa de Minas Gerais"
     uf = "MG"
     base_url = "https://dadosabertos.almg.gov.br"
-    api_url = "https://dadosabertos.almg.gov.br/ws"
+    api_url = "https://dadosabertos.almg.gov.br/api/v2"
 
     # Tipos de proposição relevantes
     TIPOS_PROPOSICAO = ["PL", "PEC", "PLO", "PDL", "PDC", "PLN"]
@@ -30,13 +36,13 @@ class ALMGConnector(BaseConnector):
 
     # ── Deputados ─────────────────────────────────────────────────────────
     def get_deputados(self) -> list[Deputado]:
-        data = self._get(f"{self.api_url}/deputados/emExercicio", params={"formato": "json"})
+        data = self._get(f"{self.api_url}/deputados/em_exercicio", params={"formato": "json"})
         lista = data.get("list", [])
         deputados = []
         for d in lista:
             deputados.append(Deputado(
                 id=self._prefix_id(d["id"]),
-                nome=d.get("nomeCompleto") or d.get("nome", ""),
+                nome=d.get("nome") or d.get("nomeCompleto", ""),
                 partido=d.get("partido", ""),
                 uf="MG",
                 assembly_id=self.assembly_id,
