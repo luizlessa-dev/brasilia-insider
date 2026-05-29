@@ -1,0 +1,37 @@
+name: Ingestão de votações (cadência baixa)
+
+# Cadência baixa: votações são caras. A ALESP só publica dumps bulk e
+# get_votacoes baixa ~70MB por execução (reuniões + votos de comissão).
+# Semanal mantém o custo de banda sob controle. Janela mais larga (14 dias)
+# cobre o intervalo entre execuções com folga.
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # segundas, 06:00 UTC (03:00 BRT)
+  workflow_dispatch:
+    inputs:
+      dias:
+        description: "Janela em dias"
+        default: "14"
+
+concurrency:
+  group: ingest-votacoes
+  cancel-in-progress: false
+
+jobs:
+  votacoes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r ingestao/requirements.txt
+      - name: Ingerir votações
+        run: |
+          python -m ingestao.scheduler \
+            --dias "${{ github.event.inputs.dias || '14' }}" \
+            --entidades votacoes

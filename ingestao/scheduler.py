@@ -42,14 +42,20 @@ def run_health_checks() -> None:
     print(f"\n{ok}/27 assembleias acessíveis\n")
 
 
+ENTIDADES_DEFAULT = ("deputados", "proposicoes", "votacoes")
+
+
 def run_ingestion(
     assembly_ids: list[str] | None,
     data_inicio: date,
     data_fim: date,
     persist: bool = True,
+    entidades: tuple[str, ...] = ENTIDADES_DEFAULT,
 ) -> None:
     targets = assembly_ids or list(REGISTRY.keys())
+    entidades = tuple(entidades)
     resultados = {"ok": [], "stub": [], "erro": []}
+    logger.info("Entidades: %s", ", ".join(entidades))
 
     writer = SupabaseWriter.from_env() if persist else None
     if persist and writer is None:
@@ -71,18 +77,21 @@ def run_ingestion(
             run_id = writer.start_run(aid, data_inicio, data_fim)
 
         try:
-            deps = connector.get_deputados()
-            props = connector.get_proposicoes(data_inicio, data_fim)
-            vots = connector.get_votacoes(data_inicio, data_fim)
+            deps = connector.get_deputados() if "deputados" in entidades else []
+            props = connector.get_proposicoes(data_inicio, data_fim) if "proposicoes" in entidades else []
+            vots = connector.get_votacoes(data_inicio, data_fim) if "votacoes" in entidades else []
             logger.info(
                 "  ✅ %d deputados | %d proposições | %d votações",
                 len(deps), len(props), len(vots),
             )
 
             if writer:
-                writer.upsert_deputados(deps)
-                writer.upsert_proposicoes(props)
-                writer.upsert_votacoes(vots)
+                if "deputados" in entidades:
+                    writer.upsert_deputados(deps)
+                if "proposicoes" in entidades:
+                    writer.upsert_proposicoes(props)
+                if "votacoes" in entidades:
+                    writer.upsert_votacoes(vots)
                 writer.finish_run(run_id, "ok", {
                     "deputados": len(deps),
                     "proposicoes": len(props),
@@ -123,6 +132,11 @@ def main() -> None:
     parser.add_argument("--assembly", nargs="*", help="IDs específicos (ex: almg alep). Default: todos.")
     parser.add_argument("--health-check", action="store_true", help="Apenas verifica conectividade")
     parser.add_argument("--no-persist", action="store_true", help="Fetch-only: não grava no banco")
+    parser.add_argument(
+        "--entidades", nargs="+", choices=list(ENTIDADES_DEFAULT), default=list(ENTIDADES_DEFAULT),
+        help="Entidades a ingerir. Default: todas. Ex: --entidades deputados proposicoes "
+             "(deixa votações, que é pesada, para um cron menos frequente).",
+    )
     args = parser.parse_args()
 
     if args.health_check:
@@ -133,7 +147,10 @@ def main() -> None:
     data_inicio = data_fim - timedelta(days=args.dias)
     logger.info("Período: %s → %s", data_inicio, data_fim)
 
-    run_ingestion(args.assembly, data_inicio, data_fim, persist=not args.no_persist)
+    run_ingestion(
+        args.assembly, data_inicio, data_fim,
+        persist=not args.no_persist, entidades=tuple(args.entidades),
+    )
 
 
 if __name__ == "__main__":

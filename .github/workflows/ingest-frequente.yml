@@ -1,0 +1,35 @@
+name: Ingestão frequente (deputados + proposições)
+
+# Cadência alta: dados leves (APIs/dumps pequenos). Votações fica de fora
+# (pesada, ~70MB na ALESP) — ver ingest-votacoes.yml.
+on:
+  schedule:
+    - cron: "0 8 * * *"   # diário, 08:00 UTC (05:00 BRT)
+  workflow_dispatch:
+    inputs:
+      dias:
+        description: "Janela em dias"
+        default: "7"
+
+concurrency:
+  group: ingest-frequente
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r ingestao/requirements.txt
+      - name: Ingerir deputados + proposições
+        run: |
+          python -m ingestao.scheduler \
+            --dias "${{ github.event.inputs.dias || '7' }}" \
+            --entidades deputados proposicoes
