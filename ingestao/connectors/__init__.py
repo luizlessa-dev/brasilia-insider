@@ -6,8 +6,9 @@ from .almg import ALMGConnector
 from .alep import ALEPConnector
 from .alesp import ALESPConnector
 from .cldf import CLDFConnector
+from .alepe import ALEPEConnector
 from ._stubs import (
-    ALERJConnector, ALBAConnector, ALEPEConnector,
+    ALERJConnector, ALBAConnector,
     ALERGSConnector, ALECEConnector, ALEPAConnector, ALEMAConnector,
     ALEGOConnector, ALESConnector, ALMTConnector, ALEMSConnector,
     ALERNConnector, ALPBConnector, ALESEConnector, ALALConnector,

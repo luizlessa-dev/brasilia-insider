@@ -31,13 +31,7 @@ class ALBAConnector(StubConnector):
     base_url = "https://www.al.ba.gov.br"
 
 
-class ALEPEConnector(StubConnector):
-    """Assembleia Legislativa de Pernambuco — Tier 1 (API + CSV)"""
-    assembly_id = "alepe"
-    assembly_name = "Assembleia Legislativa de Pernambuco"
-    uf = "PE"
-    base_url = "https://www.alepe.pe.gov.br"
-    # Dados abertos: https://www.alepe.pe.gov.br/dadosabertos/
+# ALEPE foi implementada — ver connectors/alepe.py
 
 
 class ALERGSConnector(StubConnector):
