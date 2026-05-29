@@ -2,17 +2,15 @@
 ALMG — Assembleia Legislativa de Minas Gerais
 Tier 1 — REST API documentada em https://dadosabertos.almg.gov.br/
 
-Endpoints:
-  GET /api/v2/deputados/em_exercicio     → lista de deputados  [VERIFICADO 200, 77 dep]
-  GET /api/v2/proposicoes/...            → proposições         [NÃO VERIFICADO — ver nota]
-  GET /api/v2/proposicoes/{id}/votacoes  → votações            [NÃO VERIFICADO — ver nota]
+Endpoints (mapeados contra o Swagger oficial /api/ajuda/swagger/endpoints/lastest):
+  GET /api/v2/deputados/em_exercicio            → deputados   [VERIFICADO 200, 77]
+  GET /api/v2/proposicoes/pesquisa/direcionada  → proposições [VERIFICADO; ini/fim yyyyMMdd]
+  GET /api/v2/plenario/reunioes/pesquisa + .../resultados → votações [MAPEADO, não implementado]
 
-NOTA (2026-05-28): a API de busca de proposições da ALMG v2 não responde nas
-rotas óbvias (/proposicoes 404, /proposicoes/pesquisa 403,
-/proposicoes/pesquisa/direcionada 400). get_proposicoes/get_votacoes ainda usam
-rotas especulativas e falham graciosamente (log warning, retorna []). Precisam
-ser mapeados contra a doc oficial da v2 antes de valerem como fonte. Só
-get_deputados está validado contra a API real.
+NOTA (2026-05-29): proposições agora usam pesquisa/direcionada (período por
+dataPublicacao em yyyyMMdd, paginado). Votações da v2 NÃO têm rota por
+proposição — vivem nos resultados de reuniões de plenário/comissões; get_votacoes
+está mapeado no docstring do método mas ainda retorna [] (não quebra o pipeline).
 """
 from __future__ import annotations
 
@@ -28,9 +26,6 @@ class ALMGConnector(BaseConnector):
     uf = "MG"
     base_url = "https://dadosabertos.almg.gov.br"
     api_url = "https://dadosabertos.almg.gov.br/api/v2"
-
-    # Tipos de proposição relevantes
-    TIPOS_PROPOSICAO = ["PL", "PEC", "PLO", "PDL", "PDC", "PLN"]
 
     request_delay = 0.4
 
@@ -54,90 +49,79 @@ class ALMGConnector(BaseConnector):
         return deputados
 
     # ── Proposições ───────────────────────────────────────────────────────
+    # Endpoint verificado: GET /api/v2/proposicoes/pesquisa/direcionada
+    #   ini, fim   → período por dataPublicacao, formato yyyyMMdd
+    #   p, tp      → paginação (página, tamanho)
+    # Identidade da proposição = (siglaTipoProjeto, numero, ano) — não há id
+    # numérico; o id canônico é "almg_<sigla>_<num>_<ano>".
+    PAGE_SIZE = 100
+
     def get_proposicoes(self, data_inicio: date, data_fim: date) -> list[Proposicao]:
-        anos = list(range(data_inicio.year, data_fim.year + 1))
         proposicoes: list[Proposicao] = []
+        ini = data_inicio.strftime("%Y%m%d")
+        fim = data_fim.strftime("%Y%m%d")
+        page = 1
 
-        for ano in anos:
-            for tipo in self.TIPOS_PROPOSICAO:
-                try:
-                    data = self._get(
-                        f"{self.api_url}/proposicoes",
-                        params={"tp": tipo, "ano": ano, "formato": "json"},
-                    )
-                    for p in data.get("list", []):
-                        dt = self.parse_date(p.get("dataApresentacao"))
-                        if dt and not (data_inicio <= dt <= data_fim):
-                            continue
-                        proposicoes.append(Proposicao(
-                            id=self._prefix_id(p["id"]),
-                            numero=str(p.get("numero", "")),
-                            ano=ano,
-                            tipo=tipo,
-                            ementa=p.get("ementa", ""),
-                            assembly_id=self.assembly_id,
-                            autor=p.get("autor", {}).get("nome") if isinstance(p.get("autor"), dict) else p.get("autor"),
-                            data_apresentacao=dt,
-                            situacao=p.get("situacao", {}).get("descricao") if isinstance(p.get("situacao"), dict) else None,
-                            url=f"https://www.almg.gov.br/legislacao_normas/leis_decretos_normas/norma/{p['id']}/",
-                            raw=p,
-                        ))
-                except Exception as e:
-                    self.logger.warning("ALMG: erro ao buscar %s/%d: %s", tipo, ano, e)
+        while True:
+            try:
+                data = self._get(
+                    f"{self.api_url}/proposicoes/pesquisa/direcionada",
+                    params={"ini": ini, "fim": fim, "p": page, "tp": self.PAGE_SIZE},
+                    headers={"Accept": "application/json"},
+                )
+            except Exception as e:
+                self.logger.warning("ALMG: erro proposições p%d: %s", page, e)
+                break
 
-        self.logger.info("ALMG: %d proposições carregadas (%s → %s)", len(proposicoes), data_inicio, data_fim)
+            res = data.get("resultado", {})
+            itens = res.get("listaItem") or []
+            if not itens:
+                break
+
+            for p in itens:
+                sigla = (p.get("siglaTipoProjeto") or "").strip()
+                numero = str(p.get("numero", "")).strip()
+                ano_str = str(p.get("ano", "")).strip()
+                if not (sigla and numero and ano_str):
+                    continue
+                proposicoes.append(Proposicao(
+                    id=self._prefix_id(f"{sigla}_{numero}_{ano_str}"),
+                    numero=numero,
+                    ano=int(ano_str) if ano_str.isdigit() else data_inicio.year,
+                    tipo=sigla,
+                    ementa=(p.get("assunto") or "").strip(),
+                    assembly_id=self.assembly_id,
+                    autor=(p.get("autor") or "").strip() or None,
+                    data_apresentacao=self.parse_date(p.get("dataPublicacao")),
+                    situacao=p.get("situacao"),
+                    regime=p.get("regime"),
+                    raw=p,
+                ))
+
+            total = res.get("noOcorrencias", 0)
+            if len(proposicoes) >= total or len(itens) < self.PAGE_SIZE:
+                break
+            page += 1
+
+        self.logger.info(
+            "ALMG: %d proposições carregadas (%s → %s)",
+            len(proposicoes), data_inicio, data_fim,
+        )
         return proposicoes
 
     # ── Votações ──────────────────────────────────────────────────────────
+    # MAPEADO, não implementado. A API v2 da ALMG não expõe votações por
+    # proposição (o antigo /proposicoes/{id}/votacoes não existe). Votos vivem
+    # nos resultados de reuniões:
+    #   - Plenário: GET /api/v2/plenario/reunioes/pesquisa?ini=&fim=  (yyyyMMdd)
+    #       → para cada reunião: GET /api/v2/plenario/reunioes/{ano}/{mes}/{dia}/{hora}/resultados
+    #   - Comissões: GET /api/v2/comissoes/proposicao/{tipo}/{num}/{ano}/reunioes/resultados
+    # Implementar = buscar reuniões na janela + drill-down nos resultados +
+    # parse dos votos nominais (sub-projeto análogo ao das votações da ALESP).
+    # Até lá retorna [] graciosamente — não quebra o pipeline.
     def get_votacoes(self, data_inicio: date, data_fim: date) -> list[Votacao]:
-        proposicoes = self.get_proposicoes(data_inicio, data_fim)
-        votacoes: list[Votacao] = []
-
-        for prop in proposicoes:
-            raw_id = prop.id.replace(f"{self.assembly_id}_", "")
-            try:
-                data = self._get(
-                    f"{self.api_url}/proposicoes/{raw_id}/votacoes",
-                    params={"formato": "json"},
-                )
-                for v in data.get("list", []):
-                    dt = self.parse_date(v.get("data"))
-                    if dt and not (data_inicio <= dt <= data_fim):
-                        continue
-
-                    detalhes = self._get_detalhes_votacao(raw_id, v["id"])
-                    votacoes.append(Votacao(
-                        id=self._prefix_id(v["id"]),
-                        proposicao_id=prop.id,
-                        assembly_id=self.assembly_id,
-                        data=dt,
-                        resultado=v.get("resultado", "").lower() or None,
-                        votos_sim=v.get("sim", 0),
-                        votos_nao=v.get("nao", 0),
-                        votos_abstencao=v.get("abstencao", 0),
-                        detalhes=detalhes,
-                        raw=v,
-                    ))
-            except Exception as e:
-                self.logger.debug("ALMG: sem votações para %s: %s", prop.id, e)
-
-        self.logger.info("ALMG: %d votações carregadas", len(votacoes))
-        return votacoes
-
-    def _get_detalhes_votacao(self, proposicao_id: str, votacao_id: str) -> list[VotoDeputado]:
-        try:
-            data = self._get(
-                f"{self.api_url}/proposicoes/{proposicao_id}/votacoes/{votacao_id}",
-                params={"formato": "json"},
-            )
-            votos = []
-            for item in data.get("listaVotos", []):
-                votos.append(VotoDeputado(
-                    deputado_id=self._prefix_id(item.get("deputado", {}).get("id", "")),
-                    deputado_nome=item.get("deputado", {}).get("nome", ""),
-                    voto=item.get("voto", "").lower(),
-                    partido=item.get("deputado", {}).get("partido"),
-                ))
-            return votos
-        except Exception:
-            return []
+        self.logger.info(
+            "ALMG: votações ainda não implementadas (ver fluxo plenario/reunioes "
+            "no docstring) — retornando 0"
+        )
+        return []
