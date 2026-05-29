@@ -105,7 +105,7 @@ class SupabaseWriter:
             "api_url": getattr(connector, "api_url", None),
             "updated_at": datetime.utcnow().isoformat(),
         }
-        self._upsert("casas", [row], on_conflict="id")
+        self._upsert("ale_casas", [row], on_conflict="id")
 
     # ── Parlamentares ─────────────────────────────────────────────────────
     def upsert_deputados(self, deps: Iterable[Deputado]) -> int:
@@ -126,7 +126,7 @@ class SupabaseWriter:
                 "raw": d.raw or None,
                 "updated_at": datetime.utcnow().isoformat(),
             })
-        return self._upsert("parlamentares", rows, on_conflict="id") if rows else 0
+        return self._upsert("ale_parlamentares", rows, on_conflict="id") if rows else 0
 
     # ── Proposições ───────────────────────────────────────────────────────
     def upsert_proposicoes(self, props: Iterable[Proposicao]) -> int:
@@ -149,7 +149,7 @@ class SupabaseWriter:
                 "raw": p.raw or None,
                 "updated_at": datetime.utcnow().isoformat(),
             })
-        return self._upsert("proposicoes", rows, on_conflict="id") if rows else 0
+        return self._upsert("ale_proposicoes", rows, on_conflict="id") if rows else 0
 
     # ── Votações (+ votos nominais) ───────────────────────────────────────
     def upsert_votacoes(self, vots: Iterable[Votacao]) -> int:
@@ -183,15 +183,15 @@ class SupabaseWriter:
                     "voto": det.voto or None,
                     "partido": det.partido,
                 })
-        n = self._upsert("votacoes", vot_rows, on_conflict="id") if vot_rows else 0
+        n = self._upsert("ale_votacoes", vot_rows, on_conflict="id") if vot_rows else 0
         if voto_rows:
-            self._upsert("votos", voto_rows, on_conflict="votacao_id,deputado_id")
+            self._upsert("ale_votos", voto_rows, on_conflict="votacao_id,deputado_id")
         return n
 
     # ── Log de execução ───────────────────────────────────────────────────
     def start_run(self, casa_id: str, data_inicio: date, data_fim: date) -> str | None:
         resp = self.session.post(
-            f"{self.url}/rest/v1/ingest_runs",
+            f"{self.url}/rest/v1/ale_ingest_runs",
             headers={"Prefer": "return=representation"},
             json=[{
                 "casa_id": casa_id,
@@ -213,7 +213,7 @@ class SupabaseWriter:
         if not run_id:
             return
         self.session.patch(
-            f"{self.url}/rest/v1/ingest_runs",
+            f"{self.url}/rest/v1/ale_ingest_runs",
             params={"id": f"eq.{run_id}"},
             headers={"Prefer": "return=minimal"},
             json={
