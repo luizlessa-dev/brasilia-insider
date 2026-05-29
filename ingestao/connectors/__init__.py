@@ -5,6 +5,7 @@ Importe `REGISTRY` para iterar sobre todas as assembleias.
 from .almg import ALMGConnector
 from .alep import ALEPConnector
 from .alesp import ALESPConnector
+from .cldf import CLDFConnector
 from ._stubs import (
     ALERJConnector, ALBAConnector, ALEPEConnector,
     ALERGSConnector, ALECEConnector, ALEPAConnector, ALEMAConnector,
@@ -12,7 +13,6 @@ from ._stubs import (
     ALERNConnector, ALPBConnector, ALESEConnector, ALALConnector,
     ALEPIConnector, ALEROConnector, ALEAMConnector, ALESCConnector,
     ALETOConnector, ALERRConnector, ALEACConnector, ALAPConnector,
-    CLDFConnector,
 )
 
 # Mapa assembly_id → classe do conector

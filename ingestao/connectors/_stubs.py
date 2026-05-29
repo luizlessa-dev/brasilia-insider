@@ -202,11 +202,4 @@ class ALAPConnector(StubConnector):
     base_url = "https://www.al.ap.gov.br"
 
 
-class CLDFConnector(StubConnector):
-    """Câmara Legislativa do Distrito Federal — Tier 1/2"""
-    assembly_id = "cldf"
-    assembly_name = "Câmara Legislativa do Distrito Federal"
-    uf = "DF"
-    base_url = "https://www.cl.df.gov.br"
-    # Dados abertos: https://www.cl.df.gov.br/dados-abertos
-    # PRIORIDADE ALTA: é Brasília. Implementar no Sprint 1.
+# CLDF foi implementada — ver connectors/cldf.py
