@@ -1,8 +1,19 @@
 """
 ALEP — Assembleia Legislativa do Paraná
-Tier 1 — REST API com Swagger em https://www.alep.pr.gov.br/api/
+Tier 1 — REST API.
 
-Endpoints utilizados:
+⚠️ QUEBRADO — precisa de remapeamento (diagnóstico 2026-05-29):
+- O domínio MIGROU: `www.alep.pr.gov.br` agora serve cert válido só para a
+  família `assembleia.pr.leg.br` → toda requisição estoura SSL hostname mismatch.
+- O host vivo é `https://www.assembleia.pr.leg.br` (HTTP 200, cert OK), e a home
+  linka "Dados Abertos" (/dados-abertos). MAS os paths abaixo são especulativos
+  (este conector nunca foi validado contra a API real) e retornam 404 JSON no
+  host novo (`/api/deputados/legislatura-atual`, `/api/deputados`, etc.).
+- Fix = mapear a API de dados abertos em assembleia.pr.leg.br (mesmo método
+  usado em ALMG/ALESP: achar o spec/Swagger, confirmar rotas e campos live).
+  Sub-projeto deferido — ALEP não está no caminho crítico.
+
+Endpoints atuais (ESPECULATIVOS, não funcionam):
   GET /api/deputados/legislatura-atual   → deputados
   GET /api/proposicoes                   → proposições (filtro por data)
   GET /api/votacoes                      → votações (filtro por data)
