@@ -42,12 +42,7 @@ class ALERGSConnector(StubConnector):
     base_url = "https://www.al.rs.gov.br"
 
 
-class ALECEConnector(StubConnector):
-    """Assembleia Legislativa do Ceará — Tier 2 (CSV misto)"""
-    assembly_id = "alece"
-    assembly_name = "Assembleia Legislativa do Ceará"
-    uf = "CE"
-    base_url = "https://www.al.ce.gov.br"
+# ALECE foi implementada — ver connectors/alece.py
 
 
 class ALEPAConnector(StubConnector):
