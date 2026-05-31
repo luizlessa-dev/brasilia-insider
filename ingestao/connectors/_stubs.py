@@ -63,12 +63,7 @@ class ALEMAConnector(StubConnector):
     # Qualquer implementação aqui é scraping com risco jurídico.
 
 
-class ALEGOConnector(StubConnector):
-    """Assembleia Legislativa de Goiás — Tier 2"""
-    assembly_id = "alego"
-    assembly_name = "Assembleia Legislativa de Goiás"
-    uf = "GO"
-    base_url = "https://www.al.go.leg.br"
+# ALEGO foi implementada — ver connectors/alego.py
 
 
 class ALESConnector(StubConnector):
