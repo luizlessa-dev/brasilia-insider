@@ -132,11 +132,13 @@ class ALMTConnector(BaseConnector):
                     url=f"{BASE}{a.get('href')}",
                     raw={"cpdoc": m.group(1)},
                 ))
+            # filtro de data é server-side → todo resultado está na janela;
+            # pagina enquanto a página trouxer cpdoc novo (dedup via `vistos`).
             if achou == 0:
                 break
-            if not re.search(rf"[?&]page={pagina + 1}\b", html):
-                break
             pagina += 1
+        if pagina >= MAX_PAGINAS:
+            self.logger.warning("ALMT prop: cap de %d páginas atingido.", MAX_PAGINAS)
         self.logger.info(
             "ALMT: %d proposições carregadas (%s → %s)",
             len(proposicoes), data_inicio, data_fim,
