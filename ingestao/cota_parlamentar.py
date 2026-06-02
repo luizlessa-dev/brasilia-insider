@@ -194,9 +194,16 @@ def ingerir_ano(ano: int, writer=None) -> dict:
         else:
             erros += 1
 
+    # Deduplica por PK antes do upsert — CSV às vezes repete a mesma nota
+    antes = len(despesas)
+    despesas_map: dict[tuple, dict] = {}
+    for d in despesas:
+        despesas_map[(d["id_documento"], d["id_deputado"])] = d
+    despesas = list(despesas_map.values())
+
     deputados = list(dep_map.values())
-    logger.info("Ano %d: %d deputados únicos, %d despesas, %d linhas ignoradas",
-                ano, len(deputados), len(despesas), erros)
+    logger.info("Ano %d: %d deputados únicos, %d despesas (%d duplicatas removidas), %d linhas ignoradas",
+                ano, len(deputados), len(despesas), antes - len(despesas), erros)
 
     if writer:
         _upsert(writer, "cota_deputado", deputados, "id_camara")
