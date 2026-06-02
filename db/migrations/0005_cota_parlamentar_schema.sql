@@ -124,22 +124,22 @@ SELECT
   c.nome_fornecedor                                  AS nome_na_cota,
   COUNT(DISTINCT c.id_deputado)                      AS dep_cota,
   SUM(c.valor_liquido)                               AS total_cota_brl,
-  e.nome_favorecido                                  AS nome_na_emenda,
+  e.favorecido                                       AS nome_na_emenda,
   e.valor_total                                      AS total_emenda_brl,
   e.n_autores                                        AS autores_emenda
 FROM public.cota_despesa c
 JOIN (
   SELECT
-    cnpj,
-    MAX(nome_favorecido)                             AS nome_favorecido,
-    SUM(valor_repasse)                               AS valor_total,
-    COUNT(DISTINCT autor_cpf)                        AS n_autores
+    codigo_favorecido,
+    MAX(favorecido)                                  AS favorecido,
+    SUM(valor_recebido)                              AS valor_total,
+    COUNT(DISTINCT codigo_autor)                     AS n_autores
   FROM public.emendas_favorecidos
-  WHERE cnpj IS NOT NULL AND cnpj <> ''
-  GROUP BY cnpj
-) e ON e.cnpj = c.cnpj_cpf_fornecedor
+  WHERE codigo_favorecido IS NOT NULL AND codigo_favorecido <> ''
+  GROUP BY codigo_favorecido
+) e ON e.codigo_favorecido = c.cnpj_cpf_fornecedor
 WHERE c.cnpj_cpf_fornecedor IS NOT NULL AND c.cnpj_cpf_fornecedor <> ''
-GROUP BY c.cnpj_cpf_fornecedor, c.nome_fornecedor, e.nome_favorecido, e.valor_total, e.n_autores
+GROUP BY c.cnpj_cpf_fornecedor, c.nome_fornecedor, e.favorecido, e.valor_total, e.n_autores
 ORDER BY (SUM(c.valor_liquido) + e.valor_total) DESC NULLS LAST;
 
 COMMENT ON VIEW public.cota_emenda_cruzamento IS
