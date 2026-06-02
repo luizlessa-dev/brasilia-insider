@@ -1,0 +1,81 @@
+name: Ingestão TSE
+
+# Cadência: anual, após cada eleição (dados ficam estáticos pós-resultado).
+#
+# Calendário eleitoral brasileiro:
+#   Anos terminados em 2 (2022, 2026…): eleições GERAIS
+#     → cargos 1,3,5,6,7 (Presidente, Governador, Senador, Dep. Federal, Dep. Estadual)
+#     → seed: python -m ingestao.tse.runner --dataset todos --ano <ano>
+#
+#   Anos terminados em 4 (2024, 2028…): eleições MUNICIPAIS
+#     → cargos 11,12 (Prefeito, Vice-Prefeito; vereadores omitidos — >500k registros)
+#     → seed: python -m ingestao.tse.runner --dataset todos --ano <ano>
+#
+# Volume estimado por ano:
+#   candidatos: ~30k (gerais) | ~80k (municipais, só Prefeito+VP)
+#   receitas:   ~500k registros
+#   despesas:   ~600k registros
+#
+# Tempo estimado: ~10-20min por dataset/ano (download ZIP + delete + insert)
+
+on:
+  schedule:
+    # Roda toda segunda de novembro/dezembro em anos eleitorais (pós-resultado)
+    - cron: "0 8 * 11-12 1"
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "Dataset a ingerir"
+        type: choice
+        options:
+          - todos
+          - candidatos
+          - receitas
+          - despesas
+        default: todos
+      anos:
+        description: "Anos separados por espaço (ex: 2022 2024)"
+        default: "2022 2024"
+
+concurrency:
+  group: ingest-tse
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r ingestao/requirements.txt
+
+      - name: Resolver parâmetros
+        id: params
+        run: |
+          DATASET="${{ github.event.inputs.dataset || 'todos' }}"
+          ANOS="${{ github.event.inputs.anos || '2022 2024' }}"
+          echo "dataset=$DATASET" >> $GITHUB_OUTPUT
+          echo "anos=$ANOS"       >> $GITHUB_OUTPUT
+          echo "Ingerindo dataset=$DATASET anos=$ANOS"
+
+      - name: Ingerir TSE
+        run: |
+          ANOS="${{ steps.params.outputs.anos }}"
+          DATASET="${{ steps.params.outputs.dataset }}"
+          ARGS="--dataset $DATASET"
+          for ANO in $ANOS; do
+            ARGS="$ARGS --ano $ANO"
+          done
+          python -m ingestao.tse.runner $ARGS
