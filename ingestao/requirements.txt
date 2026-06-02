@@ -2,3 +2,6 @@ requests>=2.31.0
 urllib3>=2.0.0
 beautifulsoup4>=4.12.0   # para os conectores de scraping
 lxml>=4.9.0              # parser XML (ALESP bulk download)
+# ── Data lake SIAFI (ingestao/lake/siafi/) ────────────────────────────────
+pyarrow>=15.0.0          # CSV → Parquet streaming
+boto3>=1.34.0            # upload pra Cloudflare R2 (S3-compatible)
