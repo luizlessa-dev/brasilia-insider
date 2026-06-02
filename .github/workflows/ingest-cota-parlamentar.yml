@@ -1,0 +1,65 @@
+name: Ingestão Cota Parlamentar
+
+# Cadência: mensal, dia 15 às 10:00 UTC (07:00 BRT).
+# Estratégia: sempre reingerir o ano corrente + opcionalmente anos anteriores.
+# Volume: ~500k linhas/ano, ~2min por ano no runner ubuntu.
+
+on:
+  schedule:
+    - cron: "0 10 15 * *"   # mensal, dia 15 às 10:00 UTC
+  workflow_dispatch:
+    inputs:
+      anos:
+        description: "Anos a ingerir separados por espaço (ex: 2023 2024 2025)"
+        default: ""    # vazio = só ano corrente
+      backfill:
+        description: "Ingerir todos os anos desde 2008?"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ingest-cota-parlamentar
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r ingestao/requirements.txt
+
+      - name: Calcular anos a ingerir
+        id: anos
+        run: |
+          YEAR=$(date +%Y)
+
+          if [ "${{ github.event.inputs.backfill }}" = "true" ]; then
+            # Backfill completo: 2008 até ano corrente
+            ANOS=$(seq 2008 $YEAR | tr '\n' ' ')
+          elif [ -n "${{ github.event.inputs.anos }}" ]; then
+            ANOS="${{ github.event.inputs.anos }}"
+          else
+            # Default: ano corrente + ano anterior (CSV do ano corrente é parcial)
+            PREV=$((YEAR - 1))
+            ANOS="$PREV $YEAR"
+          fi
+
+          echo "anos=$ANOS" >> $GITHUB_OUTPUT
+          echo "Ingerindo anos: $ANOS"
+
+      - name: Ingerir Cota Parlamentar
+        run: |
+          python -m ingestao.cota_parlamentar --anos ${{ steps.anos.outputs.anos }}
