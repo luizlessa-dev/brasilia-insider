@@ -144,17 +144,22 @@ def _duckdb_rows(query: str) -> list[dict]:
 
 
 def load_fornecedores_from_parquet(parquet_paths: list[Path]) -> list[dict]:
-    """Extrai fornecedores únicos de uma lista de parquets de empenho/pagamento."""
+    """Extrai fornecedores únicos de uma lista de parquets de empenho/pagamento.
+
+    O mesmo CNPJ pode aparecer com nomes ligeiramente diferentes entre tabelas.
+    Deduplicamos por cnpj_cpf (PK), mantendo o nome mais frequente (ANY_VALUE
+    após GROUP BY garante 1 linha por CNPJ).
+    """
     if not parquet_paths:
         return []
     paths_sql = ", ".join(f"'{p}'" for p in parquet_paths)
     rows = _duckdb_rows(f"""
-        WITH unioned AS (
-            SELECT DISTINCT cnpj_favorecido AS cnpj_cpf, nome_favorecido AS nome
-            FROM read_parquet([{paths_sql}], union_by_name=true)
-            WHERE cnpj_favorecido IS NOT NULL AND cnpj_favorecido <> ''
-        )
-        SELECT cnpj_cpf, nome FROM unioned
+        SELECT
+          cnpj_favorecido AS cnpj_cpf,
+          ANY_VALUE(nome_favorecido) AS nome
+        FROM read_parquet([{paths_sql}], union_by_name=true)
+        WHERE cnpj_favorecido IS NOT NULL AND cnpj_favorecido <> ''
+        GROUP BY cnpj_favorecido
     """)
     enriched = []
     for r in rows:
@@ -168,38 +173,64 @@ def load_fornecedores_from_parquet(parquet_paths: list[Path]) -> list[dict]:
 
 
 def load_execucao_mensal(parquet_path: Path) -> list[dict]:
-    """Lê parquet de execução mensal e prepara payload silver."""
+    """Lê parquet de execução mensal e prepara payload silver.
+
+    O Portal da Transparência publica ~1k linhas duplicadas por mês (mesma PK
+    composta, valores diferentes). Solução: agrupa por PK e SOMA os valores —
+    comportamento correto pra dados de execução orçamentária acumulada.
+    """
+    pk_cols = (
+        "competencia, cod_ug, cod_programa_orcamentario, cod_acao, "
+        "cod_plano_orcamentario, cod_elemento_despesa, cod_modalidade_despesa, "
+        "cod_autor_emenda, cod_subtitulo"
+    )
+    dim_cols = (
+        "ANY_VALUE(cod_orgao_superior) AS cod_orgao_superior,"
+        "ANY_VALUE(nome_orgao_superior) AS nome_orgao_superior,"
+        "ANY_VALUE(cod_orgao_subordinado) AS cod_orgao_subordinado,"
+        "ANY_VALUE(nome_orgao_subordinado) AS nome_orgao_subordinado,"
+        "ANY_VALUE(nome_ug) AS nome_ug,"
+        "ANY_VALUE(cod_gestao) AS cod_gestao,"
+        "ANY_VALUE(nome_gestao) AS nome_gestao,"
+        "ANY_VALUE(cod_unidade_orcamentaria) AS cod_unidade_orcamentaria,"
+        "ANY_VALUE(nome_unidade_orcamentaria) AS nome_unidade_orcamentaria,"
+        "ANY_VALUE(cod_funcao) AS cod_funcao,"
+        "ANY_VALUE(nome_funcao) AS nome_funcao,"
+        "ANY_VALUE(cod_subfuncao) AS cod_subfuncao,"
+        "ANY_VALUE(nome_subfuncao) AS nome_subfuncao,"
+        "ANY_VALUE(nome_programa_orcamentario) AS nome_programa_orcamentario,"
+        "ANY_VALUE(nome_acao) AS nome_acao,"
+        "ANY_VALUE(plano_orcamentario) AS plano_orcamentario,"
+        "ANY_VALUE(cod_programa_governo) AS cod_programa_governo,"
+        "ANY_VALUE(nome_programa_governo) AS nome_programa_governo,"
+        "ANY_VALUE(uf) AS uf,"
+        "ANY_VALUE(municipio) AS municipio,"
+        "ANY_VALUE(nome_subtitulo) AS nome_subtitulo,"
+        "ANY_VALUE(cod_localizador) AS cod_localizador,"
+        "ANY_VALUE(nome_localizador) AS nome_localizador,"
+        "ANY_VALUE(sigla_localizador) AS sigla_localizador,"
+        "ANY_VALUE(descricao_complementar_localizador) AS descricao_complementar_localizador,"
+        "ANY_VALUE(nome_autor_emenda) AS nome_autor_emenda,"
+        "ANY_VALUE(cod_categoria_economica) AS cod_categoria_economica,"
+        "ANY_VALUE(nome_categoria_economica) AS nome_categoria_economica,"
+        "ANY_VALUE(cod_grupo_despesa) AS cod_grupo_despesa,"
+        "ANY_VALUE(nome_grupo_despesa) AS nome_grupo_despesa,"
+        "ANY_VALUE(nome_elemento_despesa) AS nome_elemento_despesa,"
+        "ANY_VALUE(modalidade_despesa) AS modalidade_despesa"
+    )
     return _duckdb_rows(f"""
         SELECT
-          competencia,
-          cod_orgao_superior, nome_orgao_superior,
-          cod_orgao_subordinado, nome_orgao_subordinado,
-          cod_ug, nome_ug,
-          cod_gestao, nome_gestao,
-          cod_unidade_orcamentaria, nome_unidade_orcamentaria,
-          cod_funcao, nome_funcao,
-          cod_subfuncao, nome_subfuncao,
-          cod_programa_orcamentario, nome_programa_orcamentario,
-          cod_acao, nome_acao,
-          cod_plano_orcamentario, plano_orcamentario,
-          cod_programa_governo, nome_programa_governo,
-          uf, municipio,
-          cod_subtitulo, nome_subtitulo,
-          cod_localizador, nome_localizador, sigla_localizador,
-          descricao_complementar_localizador,
-          cod_autor_emenda, nome_autor_emenda,
-          cod_categoria_economica, nome_categoria_economica,
-          cod_grupo_despesa, nome_grupo_despesa,
-          cod_elemento_despesa, nome_elemento_despesa,
-          cod_modalidade_despesa, modalidade_despesa,
-          {_brl_to_numeric('valor_empenhado')} AS valor_empenhado,
-          {_brl_to_numeric('valor_liquidado')} AS valor_liquidado,
-          {_brl_to_numeric('valor_pago')} AS valor_pago,
-          {_brl_to_numeric('valor_restos_pagar_inscritos')} AS valor_restos_pagar_inscritos,
-          {_brl_to_numeric('valor_restos_pagar_cancelado')} AS valor_restos_pagar_cancelado,
-          {_brl_to_numeric('valor_restos_pagar_pagos')} AS valor_restos_pagar_pagos,
-          NULLIF(_source_last_modified, '') AS source_last_modified
+          {pk_cols},
+          {dim_cols},
+          SUM({_brl_to_numeric('valor_empenhado')}) AS valor_empenhado,
+          SUM({_brl_to_numeric('valor_liquidado')}) AS valor_liquidado,
+          SUM({_brl_to_numeric('valor_pago')}) AS valor_pago,
+          SUM({_brl_to_numeric('valor_restos_pagar_inscritos')}) AS valor_restos_pagar_inscritos,
+          SUM({_brl_to_numeric('valor_restos_pagar_cancelado')}) AS valor_restos_pagar_cancelado,
+          SUM({_brl_to_numeric('valor_restos_pagar_pagos')}) AS valor_restos_pagar_pagos,
+          ANY_VALUE(NULLIF(_source_last_modified, '')) AS source_last_modified
         FROM read_parquet('{parquet_path}')
+        GROUP BY {pk_cols}
     """)
 
 
@@ -298,6 +329,8 @@ def load_liquidacao(parquet_path: Path, snapshot_date: date) -> list[dict]:
 
 
 def load_item_empenho(parquet_path: Path, snapshot_date: date) -> list[dict]:
+    # Dedup: mesmo (id_empenho, sequencial) pode aparecer múltiplas vezes.
+    # Mantemos a linha com maior valor_atual (estado mais recente do item).
     return _duckdb_rows(f"""
         SELECT
           id_empenho, sequencial, codigo_empenho,
@@ -314,6 +347,10 @@ def load_item_empenho(parquet_path: Path, snapshot_date: date) -> list[dict]:
           '{snapshot_date.isoformat()}'::DATE AS snapshot_date,
           NULLIF(_source_last_modified, '') AS source_last_modified
         FROM read_parquet('{parquet_path}')
+        QUALIFY ROW_NUMBER() OVER (
+          PARTITION BY id_empenho, sequencial
+          ORDER BY {_brl_to_numeric('valor_atual')} DESC NULLS LAST
+        ) = 1
     """)
 
 
@@ -333,6 +370,8 @@ def load_pagamento_empenho(parquet_path: Path, snapshot_date: date) -> list[dict
 
 
 def load_pagamento_favorecido_final(parquet_path: Path, snapshot_date: date) -> list[dict]:
+    # Dedup: mesmo (codigo_pagamento, codigo_lista, cnpj_favorecido_final) duplicado.
+    # Mantemos a linha com maior valor (estado mais recente).
     return _duckdb_rows(f"""
         SELECT
           codigo_pagamento, codigo_lista, cnpj_favorecido_final,
@@ -343,6 +382,10 @@ def load_pagamento_favorecido_final(parquet_path: Path, snapshot_date: date) -> 
           NULLIF(_source_last_modified, '') AS source_last_modified
         FROM read_parquet('{parquet_path}')
         WHERE cnpj_favorecido_final IS NOT NULL AND cnpj_favorecido_final <> ''
+        QUALIFY ROW_NUMBER() OVER (
+          PARTITION BY codigo_pagamento, codigo_lista, cnpj_favorecido_final
+          ORDER BY {_brl_to_numeric('valor_pagamento_brl')} DESC NULLS LAST
+        ) = 1
     """)
 
 
@@ -385,9 +428,30 @@ def silver_snapshot(snapshot_date: date, lake_root: Path = LAKE_ROOT) -> None:
     upserter = SupabaseUpsert()
 
     # 1. Fornecedores únicos primeiro (dim)
+    # Empenho/pagamento/liquidacao usam cnpj_favorecido.
+    # Pagamento_favorecido_final usa cnpj_favorecido_final — extrai separado.
     fornecedores = load_fornecedores_from_parquet([
-        p for p in [pq_empenho, pq_pagamento, pq_liquidacao, pq_pag_ff] if p.exists()
+        p for p in [pq_empenho, pq_pagamento, pq_liquidacao] if p.exists()
     ])
+    # Adiciona favorecidos finais (coluna diferente)
+    if pq_pag_ff.exists():
+        import duckdb as _ddb
+        _con = _ddb.connect()
+        _rows = _con.execute(f"""
+            SELECT cnpj_favorecido_final AS cnpj_cpf, ANY_VALUE(nome_favorecido_final) AS nome
+            FROM read_parquet('{pq_pag_ff}')
+            WHERE cnpj_favorecido_final IS NOT NULL AND cnpj_favorecido_final <> ''
+            GROUP BY cnpj_favorecido_final
+        """).fetchall()
+        seen = {f["cnpj_cpf"] for f in fornecedores}
+        for cnpj, nome in _rows:
+            if cnpj not in seen:
+                fornecedores.append({
+                    "cnpj_cpf": cnpj,
+                    "nome": nome or "",
+                    "tipo_pessoa": classify_favorecido(cnpj),
+                })
+                seen.add(cnpj)
     logger.info("Fornecedores únicos extraídos: %d", len(fornecedores))
     upserter.upsert("siafi_fornecedor", fornecedores, on_conflict="cnpj_cpf")
 
