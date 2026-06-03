@@ -44,7 +44,7 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180   # 2022: ~10min download + ~60min insert (500k receitas)
 
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

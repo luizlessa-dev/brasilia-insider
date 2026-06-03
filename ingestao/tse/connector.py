@@ -207,23 +207,55 @@ def _csv_reader(zf: zipfile.ZipFile, filename: str) -> csv.DictReader:
 def _select_uf_files(zf: zipfile.ZipFile, prefix: str) -> list[str]:
     """Retorna arquivos por UF (ex: _MG.csv), excluindo BRASIL.
     Usar arquivos UF (~50 MB cada) em vez do BRASIL (~1-2 GB) para economizar memória.
-    Fallback para BRASIL se só existir o arquivo consolidado.
+    Fallback para BRASIL só se não houver arquivos por UF.
     """
-    # Arquivos por UF: prefixo_<ano>_<UF>.csv (UF = 2 letras maiúsculas)
+    all_names = zf.namelist()
+    logger.debug("_select_uf_files prefix=%r | total arquivos no ZIP: %d", prefix, len(all_names))
+
+    # Arquivos por UF: <prefixo>_<UF>.csv  OU  <prefixo>_<ano>_<UF>.csv
+    # (o ano já está no prefixo, então o padrão é prefixo_UF.csv)
     uf_files = sorted([
-        n for n in zf.namelist()
-        if re.search(rf"{re.escape(prefix)}_\d+_[A-Z]{{2}}\.csv$", n)
+        n for n in all_names
+        if re.search(rf"{re.escape(prefix)}_[A-Z]{{2}}\.csv$", n, re.IGNORECASE)
+        and "BRASIL" not in n.upper()
     ])
+
+    # Também aceitar padrão antigo: prefixo_\d+_UF.csv (ano no meio — não deveria ocorrer
+    # quando passamos o ano no prefixo, mas cobre casos de mudança de estrutura do TSE)
+    if not uf_files:
+        uf_files = sorted([
+            n for n in all_names
+            if re.search(rf"{re.escape(prefix)}_\d+_[A-Z]{{2}}\.csv$", n, re.IGNORECASE)
+            and "BRASIL" not in n.upper()
+        ])
+
     if uf_files:
+        logger.debug("Usando %d arquivos por UF (primeiro: %s)", len(uf_files), uf_files[0])
         return uf_files
-    # Fallback: BRASIL (arquivo único, pode ser >1 GB)
-    brasil = [n for n in zf.namelist()
-              if re.search(rf"{re.escape(prefix)}.*BRASIL.*\.csv$", n, re.IGNORECASE)]
+
+    # Fallback: BRASIL (arquivo único, pode ser >1 GB — avisa explicitamente)
+    brasil = sorted([n for n in all_names
+                     if re.search(rf"{re.escape(prefix)}.*BRASIL.*\.csv$", n, re.IGNORECASE)])
     if brasil:
+        logger.warning(
+            "ATENÇÃO: nenhum arquivo por UF encontrado para prefix=%r. "
+            "Usando arquivo BRASIL (%s) — pode ser muito grande (>1 GB).",
+            prefix, brasil[0]
+        )
         return brasil
-    # Último fallback: qualquer CSV com o prefixo
-    return sorted([n for n in zf.namelist()
-                   if re.search(rf"{re.escape(prefix)}.*\.csv$", n, re.IGNORECASE)])
+
+    # Último fallback: qualquer CSV com o prefixo (excluindo BRASIL)
+    fallback = sorted([
+        n for n in all_names
+        if re.search(rf"{re.escape(prefix)}.*\.csv$", n, re.IGNORECASE)
+        and "BRASIL" not in n.upper()
+    ])
+    if fallback:
+        return fallback
+
+    logger.error("Nenhum arquivo CSV encontrado para prefix=%r. Arquivos disponíveis: %s",
+                 prefix, all_names[:15])
+    return []
 
 
 # ─── Parser: Candidatos ───────────────────────────────────────────────────────

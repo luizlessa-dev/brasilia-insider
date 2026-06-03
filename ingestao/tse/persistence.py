@@ -14,7 +14,7 @@ from .connector import Candidato, Despesa, Receita
 
 logger = logging.getLogger("tse.persistence")
 
-CHUNK = 200
+CHUNK = 500   # aumentado: menos round-trips HTTP para datasets grandes
 
 
 class PersistenceError(Exception):
@@ -91,7 +91,7 @@ class TSEWriter:
                 f"{self.url}/rest/v1/{table}",
                 headers={"Prefer": "return=minimal"},
                 json=chunk,
-                timeout=180,
+                timeout=300,   # aumentado: chunks de 500 linhas podem levar >3min sob carga
             )
             if resp.status_code >= 300:
                 raise PersistenceError(
