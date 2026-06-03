@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS public.camara_ocupacao (
   ano_inicio            SMALLINT,
   ano_fim               SMALLINT,
   ingested_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (id_deputado, titulo, COALESCE(ano_inicio::TEXT,''), COALESCE(entidade,''))
+  PRIMARY KEY (id_deputado, titulo)
 );
 CREATE INDEX IF NOT EXISTS idx_camara_ocup_dep      ON public.camara_ocupacao(id_deputado);
 CREATE INDEX IF NOT EXISTS idx_camara_ocup_titulo   ON public.camara_ocupacao
