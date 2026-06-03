@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import requests
@@ -171,16 +171,36 @@ def _parse_orientacao(id_votacao: str, o: dict) -> dict | None:
     }
 
 
+def _janelas_mensais(data_inicio: date, data_fim: date):
+    """Gera janelas mensais para não sobrecarregar a API da Câmara."""
+    cur = data_inicio.replace(day=1)
+    while cur <= data_fim:
+        # fim do mês
+        if cur.month == 12:
+            fim_mes = cur.replace(year=cur.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            fim_mes = cur.replace(month=cur.month + 1, day=1) - timedelta(days=1)
+        yield cur, min(fim_mes, data_fim)
+        cur = fim_mes + timedelta(days=1)
+
+
 def ingerir_votacoes(data_inicio: date, data_fim: date, writer=None) -> dict:
-    """Ingere votações + votos + orientações de um período."""
+    """Ingere votações + votos + orientações de um período (por janelas mensais)."""
     logger.info("Buscando votações de %s a %s…", data_inicio, data_fim)
 
-    votacoes_raw = _paginar("votacoes", {
-        "dataInicio": data_inicio.isoformat(),
-        "dataFim": data_fim.isoformat(),
-        "ordem": "ASC",
-        "ordenarPor": "dataHoraRegistro",
-    })
+    votacoes_raw = []
+    for ini_m, fim_m in _janelas_mensais(data_inicio, data_fim):
+        logger.info("  janela %s–%s", ini_m, fim_m)
+        try:
+            batch = _paginar("votacoes", {
+                "dataInicio": ini_m.isoformat(),
+                "dataFim": fim_m.isoformat(),
+                "ordem": "ASC",
+                "ordenarPor": "dataHoraRegistro",
+            })
+            votacoes_raw.extend(batch)
+        except Exception as e:
+            logger.warning("votações %s–%s: %s", ini_m, fim_m, e)
     logger.info("%d votações encontradas", len(votacoes_raw))
 
     votacoes = [_parse_votacao(v) for v in votacoes_raw]
