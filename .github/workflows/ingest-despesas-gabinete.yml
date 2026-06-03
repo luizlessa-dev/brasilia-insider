@@ -1,0 +1,64 @@
+name: Ingestão Despesas de Gabinete
+
+# Despesas administrativas dos gabinetes dos deputados federais.
+# Fonte: API dadosabertos.camara.leg.br/api/v2/deputados/{id}/despesas
+# Tabela alvo: despesas_gabinete_raw (pipeline TS legado)
+#
+# Cadência: mensal dia 18 — dados chegam com lag de ~2 semanas.
+# Volume: ~500k linhas/ano, ~90min por ano completo.
+
+on:
+  schedule:
+    - cron: "0 9 18 * *"   # mensal dia 18, 09:00 UTC
+  workflow_dispatch:
+    inputs:
+      anos:
+        description: "Anos separados por espaço (ex: 2023 2024 2025)"
+        default: ""
+      backfill:
+        description: "Ingerir desde 2013?"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ingest-despesas-gabinete
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r ingestao/requirements.txt
+
+      - name: Calcular anos
+        id: cfg
+        run: |
+          YEAR=$(date +%Y)
+          if [ "${{ github.event.inputs.backfill }}" = "true" ]; then
+            ANOS=$(seq 2013 $YEAR | tr '\n' ' ')
+          elif [ -n "${{ github.event.inputs.anos }}" ]; then
+            ANOS="${{ github.event.inputs.anos }}"
+          else
+            PREV=$((YEAR - 1))
+            ANOS="$PREV $YEAR"
+          fi
+          echo "anos=$ANOS" >> $GITHUB_OUTPUT
+          echo "Ingerindo anos: $ANOS"
+
+      - name: Ingerir despesas de gabinete
+        run: |
+          python -m ingestao.despesas_gabinete --anos ${{ steps.cfg.outputs.anos }}
