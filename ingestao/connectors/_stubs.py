@@ -29,12 +29,7 @@ class ALBAConnector(StubConnector):
 # ALEPE foi implementada — ver connectors/alepe.py
 
 
-class ALERGSConnector(StubConnector):
-    """Assembleia Legislativa do Rio Grande do Sul — Tier 3 (scraping)"""
-    assembly_id = "alergs"
-    assembly_name = "Assembleia Legislativa do Rio Grande do Sul"
-    uf = "RS"
-    base_url = "https://www.al.rs.gov.br"
+# ALERGS foi implementada — ver connectors/alergs.py
 
 
 # ALECE foi implementada — ver connectors/alece.py

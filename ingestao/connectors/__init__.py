@@ -12,9 +12,10 @@ from .alego import ALEGOConnector
 from .ales import ALESConnector
 from .almt import ALMTConnector
 from .alerj import ALERJConnector
+from .alergs import ALERGSConnector
 from ._stubs import (
     ALBAConnector,
-    ALERGSConnector, ALEPAConnector, ALEMAConnector,
+    ALEPAConnector, ALEMAConnector,
     ALEMSConnector,
     ALERNConnector, ALPBConnector, ALESEConnector, ALALConnector,
     ALEPIConnector, ALEROConnector, ALEAMConnector, ALESCConnector,
