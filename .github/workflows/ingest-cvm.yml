@@ -1,0 +1,26 @@
+name: Ingestão CVM — Processos Sancionadores
+
+on:
+  schedule:
+    - cron: "30 7 * * *"   # diário, 07:30 UTC (04:30 BRT) — CVM atualiza de madrugada
+  workflow_dispatch:
+
+concurrency:
+  group: ingest-cvm
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r ingestao/requirements.txt
+      - name: Ingerir processos sancionadores CVM
+        run: python -m ingestao.cvm_runner
