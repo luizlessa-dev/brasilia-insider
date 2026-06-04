@@ -148,23 +148,35 @@ def _slugify(nome: str) -> str:
 
 RESULTADO_MAPA: dict[str, str] = {
     # Favorável ao requerente/recorrente
-    "procedente":           "favoravel",
-    "provido":              "favoravel",
-    "deferido":             "favoravel",
-    "concedida":            "favoravel",
-    "concedido":            "favoravel",
-    "conhecido e provido":  "favoravel",
+    "procedente":                               "favoravel",
+    "procedente em parte":                      "favoravel",
+    "provido":                                  "favoravel",
+    "provido em parte":                         "favoravel",
+    "deferido":                                 "favoravel",
+    "deferido em parte":                        "favoravel",
+    "concedida":                                "favoravel",
+    "concedido":                                "favoravel",
+    "conhecido e provido":                      "favoravel",
+    "agravo regimental provido":                "favoravel",
+    "agravo provido e desde logo provido":      "favoravel",
     # Contrário
-    "improcedente":         "contrario",
-    "não provido":          "contrario",
-    "desprovido":           "contrario",
-    "indeferido":           "contrario",
-    "negado":               "contrario",
-    "negado seguimento":    "contrario",
-    "não conhecido":        "contrario",
-    "agravo não provido":   "contrario",
+    "improcedente":                             "contrario",
+    "não provido":                              "contrario",
+    "desprovido":                               "contrario",
+    "indeferido":                               "contrario",
+    "negado":                                   "contrario",
+    "negado seguimento":                        "contrario",
+    "não conhecido":                            "contrario",
+    "não conhecidos":                           "contrario",
+    "não conhecida":                            "contrario",
+    "agravo não provido":                       "contrario",
+    "agravo regimental não provido":            "contrario",
+    "agravo regimental não conhecido":          "contrario",
+    "embargos rejeitados":                      "contrario",
+    "embargos não conhecidos":                  "contrario",
+    "inadmitidos os embargos":                  "contrario",
     # Neutro / processual
-    "prejudicado":          "neutro",
+    "prejudicado":                              "neutro",
     "homologado":           "neutro",
     "arquivado":            "neutro",
     "baixado":              "neutro",
@@ -264,7 +276,8 @@ class SupabaseClient:
                 json=lote,
                 headers=self.headers,
             )
-            resp.raise_for_status()
+            if not resp.ok:
+                raise ValueError(f"Supabase {resp.status_code}: {resp.text[:400]}")
             total += len(lote)
         return total
 
@@ -298,22 +311,51 @@ def ingerir_decisoes(path: Path, dataset: str, db: SupabaseClient) -> tuple[int,
                 # Normalizar nomes de colunas (lower + strip)
                 row = {k.lower().strip(): v.strip() for k, v in linha.items() if k}
 
-                # Extrair campos — os CSVs do STF variam um pouco por época
-                incidente    = int(row.get("incidente") or 0) or None
-                classe       = row.get("classe") or row.get("tipo") or None
-                numero       = row.get("número") or row.get("numero") or None
+                # Extrair campos — CSVs do Corte Aberta usam nomes específicos:
+                # "idfatodecisao", "nome ministro (a)", "andamento decisão", "órgão julgador"
+                # Suportamos também variantes legadas
+                incidente    = int(row.get("idfatodecisao") or row.get("incidente") or 0) or None
+
+                # Classe e número: extrair do campo "processo" (ex: "ADI 7236")
+                processo_raw = row.get("processo") or ""
+                partes_proc  = processo_raw.strip().split()
+                classe       = row.get("classe") or (partes_proc[0] if partes_proc else None)
+                numero       = row.get("número") or row.get("numero") or (partes_proc[1] if len(partes_proc) > 1 else None)
                 num_int      = int(re.sub(r"\D", "", numero)) if numero else None
-                ano_aut      = int(row.get("ano de autuação") or row.get("ano_autuacao") or 0) or None
+
+                ano_aut      = int(row.get("ano da decisão") or row.get("ano de autuação") or row.get("ano_autuacao") or 0) or None
                 data_dec_s   = row.get("data da decisão") or row.get("data_decisao") or ""
-                ministro     = (row.get("ministro") or row.get("relator") or "").strip()
+
+                # Ministro: campo real é "nome ministro (a)"
+                ministro     = (
+                    row.get("nome ministro (a)") or
+                    row.get("ministro") or
+                    row.get("relator") or
+                    row.get("relator atual") or ""
+                ).strip()
+
+                # Órgão julgador: campo real é "órgão julgador"
                 orgao        = (row.get("órgão julgador") or row.get("orgao_julgador") or "").strip()
-                nome_dec     = (row.get("decisão") or row.get("tipo de decisão") or row.get("nome_decisao") or "").strip()
-                assunto      = row.get("assunto") or row.get("ramo do direito") or None
+
+                # Nome/tipo da decisão: campo real é "andamento decisão"
+                nome_dec     = (
+                    row.get("andamento decisão") or
+                    row.get("tipo decisão") or
+                    row.get("decisão") or
+                    row.get("tipo de decisão") or
+                    row.get("nome_decisao") or
+                    row.get("descrição") or ""
+                ).strip()
+
+                # Tipo de decisão: derivado de "origem decisão" (MONOCRÁTICA, TRIBUNAL PLENO etc.)
+                origem_dec   = (row.get("origem decisão") or "").strip()
+                assunto      = row.get("ramo direito") or row.get("assunto") or row.get("ramo do direito") or None
                 requerente   = row.get("requerente") or row.get("parte ativa") or None
 
                 data_dec = _parse_date(data_dec_s)
                 ministro_id = _slugify(ministro) if ministro else None
-                tipo_dec    = _tipo_decisao(orgao, nome_dec)
+                # usar origem_dec (MONOCRÁTICA / TRIBUNAL PLENO / 1ª TURMA etc.) para tipo
+                tipo_dec    = _tipo_decisao(origem_dec or orgao, nome_dec)
                 resultado   = _normalizar_resultado(nome_dec)
 
                 reg = {
@@ -333,8 +375,7 @@ def ingerir_decisoes(path: Path, dataset: str, db: SupabaseClient) -> tuple[int,
                     "requerente":       requerente,
                     "fonte_csv":        dataset,
                 }
-                # Remover campos None para não poluir o upsert
-                reg = {k: v for k, v in reg.items() if v is not None}
+                # Manter todas as chaves (PostgREST PGRST102 exige chaves uniformes no lote)
                 registros.append(reg)
                 ok += 1
 
@@ -394,7 +435,6 @@ def ingerir_acervo(path: Path, dataset: str, db: SupabaseClient) -> tuple[int, i
                     "requerido":        requerido,
                     "fonte_csv":        dataset,
                 }
-                reg = {k: v for k, v in reg.items() if v is not None}
                 registros.append(reg)
                 ok += 1
 
