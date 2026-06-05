@@ -77,7 +77,13 @@ def _fetch_csv_rows(ano: int, timeout: int = 120) -> list[dict]:
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
         # Há exatamente 1 CSV por ZIP
         csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
-        raw = zf.read(csv_name).decode("windows-1252", errors="replace")
+        raw_bytes = zf.read(csv_name)
+        # CSVs até ~2022 são windows-1252; a partir de ~2023 a Câmara migrou para UTF-8.
+        # Tentamos UTF-8 primeiro; se falhar (erro real, não só substituição), usamos windows-1252.
+        try:
+            raw = raw_bytes.decode("utf-8-sig")   # utf-8-sig consome BOM se presente
+        except UnicodeDecodeError:
+            raw = raw_bytes.decode("windows-1252", errors="replace")
 
     reader = csv.DictReader(io.StringIO(raw), delimiter=";")
     return list(reader)
