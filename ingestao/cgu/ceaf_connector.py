@@ -82,34 +82,48 @@ def _parse_date(value: str | None) -> date | None:
     return None
 
 
+_SEM_INFO = {"sem informação", "sem informacao", "sem info", "", "-1", "none", "null"}
+
+
+def _is_valid_uf(val: str) -> bool:
+    """Retorna True se val parece um código de UF válido (2 letras, não é placeholder)."""
+    v = val.strip().upper()
+    return len(v) == 2 and v.isalpha() and v.lower() not in _SEM_INFO
+
+
 def _extract_uf(uf_obj: dict) -> str | None:
     """
     Extrai o código de 2 letras da UF a partir de UFLotacaoDTO.
-    O campo 'uf' pode ser uma string ("SP") ou um dict aninhado
-    ({"sigla": "SP", ...}) dependendo da versão da API.
+    Estrutura real da API (confirmada):
+      ufLotacaoPessoa.uf.sigla = "SP"  (ou "Sem informação" quando ausente)
+
+    Também trata variantes onde uf é string direta.
     """
     if not uf_obj:
         return None
+
     uf = uf_obj.get("uf")
-    # Caso 1: string direta
-    if isinstance(uf, str):
-        return uf.strip()[:2].upper() or None
-    # Caso 2: dict aninhado — tentar campos comuns
+
+    # Estrutura confirmada: uf é dict com campo "sigla"
     if isinstance(uf, dict):
-        for campo in ("sigla", "uf", "codigo", "codigoUf", "nome"):
-            val = uf.get(campo)
-            if isinstance(val, str) and len(val.strip()) == 2:
-                return val.strip().upper()
-        # Fallback: qualquer valor string de exatamente 2 letras maiúsculas
-        for val in uf.values():
-            if isinstance(val, str) and len(val.strip()) == 2 and val.strip().isupper():
-                return val.strip()
-    # Caso 3: uf_obj tem campo sigla direto (algumas versões)
-    for campo in ("sigla", "codigoUf"):
-        val = uf_obj.get(campo)
-        if isinstance(val, str) and len(val.strip()) == 2:
-            return val.strip().upper()
-    logger.debug("_extract_uf: estrutura não reconhecida em %s", uf_obj)
+        sigla = uf.get("sigla") or ""
+        if _is_valid_uf(sigla):
+            return sigla.strip().upper()
+        # Fallback: tentar "nome" (às vezes contém a sigla)
+        nome = uf.get("nome") or ""
+        if _is_valid_uf(nome):
+            return nome.strip().upper()
+        return None
+
+    # Variante: uf é string direta
+    if isinstance(uf, str) and _is_valid_uf(uf):
+        return uf.strip().upper()
+
+    # Variante: sigla direta no uf_obj
+    sigla_direta = uf_obj.get("sigla") or ""
+    if _is_valid_uf(sigla_direta):
+        return sigla_direta.strip().upper()
+
     return None
 
 
