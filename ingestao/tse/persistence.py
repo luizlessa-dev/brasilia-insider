@@ -4,11 +4,9 @@ from __future__ import annotations
 import logging
 import os
 from datetime import date, datetime
-from typing import Iterable, Union
+from typing import Iterable, Iterator, Union
 
 import requests
-
-from typing import Iterator
 
 from .connector import Candidato, Despesa, Receita
 
