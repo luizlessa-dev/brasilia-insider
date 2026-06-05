@@ -82,6 +82,37 @@ def _parse_date(value: str | None) -> date | None:
     return None
 
 
+def _extract_uf(uf_obj: dict) -> str | None:
+    """
+    Extrai o código de 2 letras da UF a partir de UFLotacaoDTO.
+    O campo 'uf' pode ser uma string ("SP") ou um dict aninhado
+    ({"sigla": "SP", ...}) dependendo da versão da API.
+    """
+    if not uf_obj:
+        return None
+    uf = uf_obj.get("uf")
+    # Caso 1: string direta
+    if isinstance(uf, str):
+        return uf.strip()[:2].upper() or None
+    # Caso 2: dict aninhado — tentar campos comuns
+    if isinstance(uf, dict):
+        for campo in ("sigla", "uf", "codigo", "codigoUf", "nome"):
+            val = uf.get(campo)
+            if isinstance(val, str) and len(val.strip()) == 2:
+                return val.strip().upper()
+        # Fallback: qualquer valor string de exatamente 2 letras maiúsculas
+        for val in uf.values():
+            if isinstance(val, str) and len(val.strip()) == 2 and val.strip().isupper():
+                return val.strip()
+    # Caso 3: uf_obj tem campo sigla direto (algumas versões)
+    for campo in ("sigla", "codigoUf"):
+        val = uf_obj.get(campo)
+        if isinstance(val, str) and len(val.strip()) == 2:
+            return val.strip().upper()
+    logger.debug("_extract_uf: estrutura não reconhecida em %s", uf_obj)
+    return None
+
+
 def _build_session(api_key: str) -> requests.Session:
     session = requests.Session()
     retry = Retry(
@@ -123,7 +154,7 @@ def _parse_record(r: dict) -> Expulsao:
         orgao_sigla=orgao.get("sigla"),
         orgao_pasta_sigla=orgao.get("siglaDaPasta"),
         orgao_nome=orgao.get("nome"),
-        uf_lotacao=str(uf_obj.get("uf") or "")[:2] or None,
+        uf_lotacao=_extract_uf(uf_obj),
         portaria=punicao.get("portaria"),
         numero_processo=punicao.get("processo"),
         pagina_dou=punicao.get("paginaDOU"),
