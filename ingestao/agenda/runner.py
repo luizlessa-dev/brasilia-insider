@@ -26,7 +26,7 @@ try:
 except ImportError:
     create_client = None
 
-from . import camara_connector, senado_connector
+from . import camara_connector, senado_connector, eagendas_connector
 
 logging.basicConfig(
     level=logging.INFO,
@@ -113,6 +113,8 @@ def main():
     parser.add_argument("--data-fim", help="Data de fim YYYY-MM-DD")
     parser.add_argument("--camara-only", action="store_true")
     parser.add_argument("--senado-only", action="store_true")
+    parser.add_argument("--eagendas-only", action="store_true")
+    parser.add_argument("--sem-eagendas", action="store_true", help="Pular e-Agendas (sem token)")
     parser.add_argument("--backfill", action="store_true", help="Ingestão histórica por ano")
     parser.add_argument("--ano", type=int, help="Ano para backfill (ex: 2024)")
     args = parser.parse_args()
@@ -124,8 +126,12 @@ def main():
         fontes = ["camara"]
     elif args.senado_only:
         fontes = ["senado"]
-    else:
+    elif args.eagendas_only:
+        fontes = ["eagendas"]
+    elif args.sem_eagendas:
         fontes = ["camara", "senado"]
+    else:
+        fontes = ["camara", "senado", "eagendas"]
 
     # Backfill histórico
     if args.backfill:
@@ -152,6 +158,15 @@ def main():
         resultados["camara"] = run_camara(supabase, data_inicio, data_fim)
     if "senado" in fontes:
         resultados["senado"] = run_senado(supabase, data_inicio, data_fim)
+    if "eagendas" in fontes:
+        token = os.environ.get("EAGENDAS_TOKEN", "")
+        if not token:
+            logger.warning("EAGENDAS_TOKEN não definido — pulando e-Agendas")
+        else:
+            logger.info("=== e-Agendas (Executivo Federal) ===")
+            resultado_ea = eagendas_connector.run(supabase, data_inicio, data_fim, token=token)
+            log_ingest(supabase, "eagendas", data_inicio, data_fim, resultado_ea)
+            resultados["eagendas"] = resultado_ea
 
     # Resumo final
     print("\n=== RESUMO ===")
