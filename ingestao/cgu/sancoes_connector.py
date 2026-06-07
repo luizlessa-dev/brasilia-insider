@@ -198,11 +198,24 @@ def _parse_record(raw: dict, cadastro: Cadastro) -> Sancao:
 
 # ─── Conector ─────────────────────────────────────────────────────────────────
 
+# Nomes dos parâmetros de data variam por endpoint (inconsistência da API):
+#   CEIS → dataInicialSancao / dataFinalSancao
+#   CNEP → dataInicioSancao  / dataFimSancao
+DATE_PARAMS: dict[str, tuple[str, str]] = {
+    "CEIS": ("dataInicialSancao", "dataFinalSancao"),
+    "CNEP": ("dataInicioSancao",  "dataFimSancao"),
+}
+
+
 class SancoesConnector:
     """
     Itera sobre todos os registros do CEIS ou CNEP via API paginada.
-    Usa janelas anuais (dataInicialSancao / dataFinalSancao) para cobrir
-    todo o histórico sem depender de tamanhoPagina (não documentado).
+    Usa janelas anuais para cobrir todo o histórico sem depender de
+    tamanhoPagina (não documentado pela API).
+
+    Atenção: os parâmetros de data têm nomes DIFERENTES por endpoint:
+      CEIS → dataInicialSancao / dataFinalSancao
+      CNEP → dataInicioSancao  / dataFimSancao
     """
 
     def __init__(self, api_key: str) -> None:
@@ -221,12 +234,14 @@ class SancoesConnector:
             time.sleep(PAGE_DELAY - elapsed)
         self._last_req = time.monotonic()
 
-    def _fetch_page(self, url: str, pagina: int, ini: str, fim: str) -> list[dict]:
+    def _fetch_page(self, url: str, cadastro: Cadastro,
+                    pagina: int, ini: str, fim: str) -> list[dict]:
         self._throttle()
+        param_ini, param_fim = DATE_PARAMS[cadastro]
         params = {
-            "dataInicialSancao": ini,
-            "dataFinalSancao":   fim,
-            "pagina":            pagina,
+            param_ini: ini,
+            param_fim: fim,
+            "pagina":  pagina,
         }
         resp = self.session.get(url, params=params, timeout=45)
         if resp.status_code == 401:
@@ -241,7 +256,7 @@ class SancoesConnector:
         pagina = 1
         total = 0
         while True:
-            records = self._fetch_page(url, pagina, ini, fim)
+            records = self._fetch_page(url, cadastro, pagina, ini, fim)
             if not records:
                 break
             for r in records:
@@ -270,7 +285,7 @@ class SancoesConnector:
         fim = datetime.utcnow().strftime("%d/%m/%Y")
         pagina = 1
         while True:
-            records = self._fetch_page(BASE_CEIS, pagina, ini, fim)
+            records = self._fetch_page(BASE_CEIS, "CEIS", pagina, ini, fim)
             if not records:
                 break
             for r in records:
@@ -283,7 +298,7 @@ class SancoesConnector:
         fim = datetime.utcnow().strftime("%d/%m/%Y")
         pagina = 1
         while True:
-            records = self._fetch_page(BASE_CNEP, pagina, ini, fim)
+            records = self._fetch_page(BASE_CNEP, "CNEP", pagina, ini, fim)
             if not records:
                 break
             for r in records:
