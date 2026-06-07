@@ -1,4 +1,5 @@
 requests>=2.31.0
+openpyxl>=3.1.0          # leitura de XLSX (ex-presidentes PR)
 urllib3>=2.0.0
 beautifulsoup4>=4.12.0   # para os conectores de scraping
 lxml>=4.9.0              # parser XML (ALESP bulk download)
