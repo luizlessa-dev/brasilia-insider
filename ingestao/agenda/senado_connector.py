@@ -156,9 +156,12 @@ def normalize_comissao(item: dict) -> dict:
         if isinstance(colegiado, dict) else "SF"
     )
 
+    data_inicio_date = data_inicio[:10] if data_inicio else None
+
     return {
         "id": codigo,
         "data_hora_inicio": data_inicio if data_inicio else None,
+        "data_inicio_date": data_inicio_date,
         "titulo": item.get("Titulo") or item.get("titulo"),
         "descricao": item.get("Descricao") or item.get("descricao"),
         "tipo_cod": str(tipo_cod) if tipo_cod else None,

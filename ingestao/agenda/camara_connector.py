@@ -162,10 +162,14 @@ def normalize_evento(item: dict) -> dict:
     orgaos, siglas = _extract_orgaos(item)
     local = _extract_local(item)
 
+    dhi = item.get("dataHoraInicio")
+    data_inicio_date = dhi[:10] if dhi else None
+
     return {
         "id": evento_id,
-        "data_hora_inicio": item.get("dataHoraInicio"),
+        "data_hora_inicio": dhi,
         "data_hora_fim": item.get("dataHoraFim"),
+        "data_inicio_date": data_inicio_date,
         "tipo_evento_cod": item.get("codTipoEvento"),
         "tipo_evento": item.get("descricaoTipo"),
         "situacao": item.get("descricaoSituacao"),

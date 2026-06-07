@@ -22,7 +22,7 @@ create table if not exists agenda_camara_eventos (
     -- Temporalidade
     data_hora_inicio    timestamptz,
     data_hora_fim       timestamptz,
-    data_inicio_date    date generated always as (data_hora_inicio::date) stored,
+    data_inicio_date    date,                       -- preenchido pelo conector (data_hora_inicio::date)
 
     -- Classificação
     tipo_evento_cod     integer,
@@ -74,7 +74,7 @@ create table if not exists agenda_senado_comissoes (
 
     -- Temporalidade
     data_hora_inicio    timestamptz,
-    data_inicio_date    date generated always as (data_hora_inicio::date) stored,
+    data_inicio_date    date,                       -- preenchido pelo conector
 
     -- Identificação
     titulo              text,
