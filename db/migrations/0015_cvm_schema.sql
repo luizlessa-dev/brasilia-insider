@@ -59,21 +59,21 @@ select
     p.fase_atual                            as cvm_fase,
     p.data_abertura                         as cvm_data_abertura,
     p.nup                                   as cvm_nup,
-    f.cnpj_cpf                              as favorecido_cnpj,
-    f.favorecido_nome                       as favorecido_nome,
+    f.codigo_favorecido                     as favorecido_cnpj,
+    f.favorecido                            as favorecido_nome,
     f.uf_favorecido                         as uf,
-    sum(f.valor_repasse)                    as total_emendas,
-    count(distinct f.autor_cpf)             as n_parlamentares,
+    sum(f.valor_recebido)                   as total_emendas,
+    count(distinct f.nome_autor)            as n_parlamentares,
     count(*)                                as n_transacoes
 from cvm_acusados a
 join cvm_processos p on p.nup = a.nup
 join emendas_favorecidos f
-    on upper(regexp_replace(f.favorecido_nome, '[^A-Za-zÀ-ÿ0-9 ]', '', 'g'))
+    on upper(regexp_replace(f.favorecido, '[^A-Za-zÀ-ÿ0-9 ]', '', 'g'))
        = a.nome_normalizado
 group by
     a.nome_acusado, a.situacao, p.fase_atual,
     p.data_abertura, p.nup,
-    f.cnpj_cpf, f.favorecido_nome, f.uf_favorecido
+    f.codigo_favorecido, f.favorecido, f.uf_favorecido
 order by total_emendas desc;
 
 comment on view cvm_cruzamento_emendas is

@@ -43,14 +43,13 @@ order by total_emendas desc;
 -- 4. Parlamentares que mais enviaram emendas a empresas com processo CVM
 -- (requer join adicional com parlamentares — ajustar conforme schema)
 select
-    f.autor_nome,
-    f.partido,
-    f.uf_autor,
-    count(distinct c.cvm_nup)               as n_empresas_com_processo_cvm,
-    sum(f.valor_repasse)                    as total_emendas_para_essas_empresas
+    f.nome_autor,
+    f.uf_favorecido                         as uf,
+    count(distinct c.nup)                   as n_empresas_com_processo_cvm,
+    sum(f.valor_recebido)                   as total_emendas_para_essas_empresas
 from emendas_favorecidos f
 join cvm_acusados a
-    on upper(regexp_replace(f.favorecido_nome, '[^A-Za-zÀ-ÿ0-9 ]', '', 'g'))
+    on upper(regexp_replace(f.favorecido, '[^A-Za-zÀ-ÿ0-9 ]', '', 'g'))
        = a.nome_normalizado
 join cvm_processos c on c.nup = a.nup
 group by f.autor_nome, f.partido, f.uf_autor
