@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS public.ele2026_candidatos (
   limite_despesa          NUMERIC(16,2),
 
   -- cruzamento com mandato anterior (preenchido na ingestão quando disponível)
-  parlamentar_id          INTEGER       REFERENCES public.parlamentares(id),
+  parlamentar_id          UUID          REFERENCES public.parlamentares(id),
   id_camara               INTEGER,                  -- para join direto com emendas_favorecidos.codigo_autor
 
   ingested_at             TIMESTAMPTZ   NOT NULL DEFAULT now(),
@@ -249,7 +249,7 @@ CREATE TABLE IF NOT EXISTS public.ele2026_alertas (
   descricao           TEXT,                         -- contexto editorial livre (não publicado)
 
   -- referências cruzadas já confirmadas
-  parlamentar_id      INTEGER       REFERENCES public.parlamentares(id),
+  parlamentar_id      UUID          REFERENCES public.parlamentares(id),
   emenda_total_hist   NUMERIC(16,2),               -- total de emendas históricas (snapshot)
   tem_sancao          BOOLEAN       DEFAULT false,
   investigacoes       TEXT[],                       -- referências a matérias / dossiês internos
