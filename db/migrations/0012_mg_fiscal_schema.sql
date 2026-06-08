@@ -76,3 +76,41 @@ order by total_pago_mg desc nulls last;
 comment on view mg_cruzamento_emendas is
     'Empresas que recebem empenhos estaduais MG E emendas parlamentares federais. '
     'Chave de join: CNPJ normalizado (só dígitos).';
+
+-- ── Contratos MG ──────────────────────────────────────────────────────────────
+-- Adicionado em 2026-06-05
+create table if not exists mg_contratos (
+    id                          text primary key,   -- "mg_ct_<ano>_<numero_contrato>"
+
+    ano_assinatura              integer,
+    codigo_orgao                text,
+    nome_orgao                  text,
+
+    cnpj_cpf_fornecedor         text,               -- chave de cruzamento
+    nome_fornecedor             text,
+    tipo_pessoa                 text,
+
+    numero_processo             text,
+    numero_contrato             text,
+    situacao                    text,
+    tipo_contrato               text,
+    objeto                      text,
+
+    data_assinatura             date,
+    data_inicio_vigencia        date,
+    data_termino_vigencia       date,
+
+    procedimento_contratacao    text,
+    procedimento_detalhamento   text,
+
+    valor_total                 numeric(18,2),
+    valor_empenhado             numeric(18,2),
+    valor_liquidado             numeric(18,2),
+
+    updated_at                  timestamptz default now()
+);
+
+create index if not exists mg_contratos_cnpj_idx      on mg_contratos (cnpj_cpf_fornecedor);
+create index if not exists mg_contratos_ano_idx       on mg_contratos (ano_assinatura);
+create index if not exists mg_contratos_orgao_idx     on mg_contratos (codigo_orgao);
+create index if not exists mg_contratos_proc_idx      on mg_contratos (procedimento_contratacao);
