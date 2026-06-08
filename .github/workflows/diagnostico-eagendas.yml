@@ -1,0 +1,27 @@
+name: Diagnóstico — e-Agendas (cargos PR + 8 ministérios)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      EAGENDAS_TOKEN: ${{ secrets.EAGENDAS_TOKEN }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install requests
+
+      - name: Rodar diagnóstico
+        run: python -m ingestao.agenda.diagnostico_eagendas
