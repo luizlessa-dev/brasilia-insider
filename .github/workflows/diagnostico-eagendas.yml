@@ -24,4 +24,4 @@ jobs:
         run: pip install requests
 
       - name: Rodar diagnóstico
-        run: python -m ingestao.agenda.diagnostico_eagendas
+        run: python ingestao/agenda/diagnostico_eagendas.py
