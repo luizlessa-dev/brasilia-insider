@@ -312,9 +312,7 @@ SELECT
   ef.valor_recebido,
   ef.ano_emenda,
   ef.tipo_emenda,
-  ef.subtipo,
-  ef.funcao,
-  ef.subfuncao
+  ef.subtipo
 FROM public.ele2026_candidatos c
 JOIN public.parlamentares p
   ON p.cpf = c.cpf
