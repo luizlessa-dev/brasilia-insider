@@ -23,6 +23,7 @@ from typing import Any, Iterable
 import requests
 
 from .models import Deputado, Proposicao, Votacao
+from .retry import with_retry
 
 logger = logging.getLogger("persistence")
 
@@ -89,12 +90,15 @@ class SupabaseWriter:
         total = 0
         for i in range(0, len(rows), CHUNK):
             chunk = rows[i:i + CHUNK]
-            resp = self.session.post(
-                f"{self.url}/rest/v1/{table}",
-                params={"on_conflict": on_conflict},
-                headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
-                json=chunk,
-                timeout=60,
+            resp = with_retry(
+                lambda chunk=chunk: self.session.post(
+                    f"{self.url}/rest/v1/{table}",
+                    params={"on_conflict": on_conflict},
+                    headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+                    json=chunk,
+                    timeout=60,
+                ),
+                what=f"upsert {table}",
             )
             if resp.status_code >= 300:
                 raise PersistenceError(
@@ -198,16 +202,19 @@ class SupabaseWriter:
 
     # ── Log de execução ───────────────────────────────────────────────────
     def start_run(self, casa_id: str, data_inicio: date, data_fim: date) -> str | None:
-        resp = self.session.post(
-            f"{self.url}/rest/v1/ale_ingest_runs",
-            headers={"Prefer": "return=representation"},
-            json=[{
-                "casa_id": casa_id,
-                "status": "running",
-                "data_inicio": data_inicio.isoformat(),
-                "data_fim": data_fim.isoformat(),
-            }],
-            timeout=30,
+        resp = with_retry(
+            lambda: self.session.post(
+                f"{self.url}/rest/v1/ale_ingest_runs",
+                headers={"Prefer": "return=representation"},
+                json=[{
+                    "casa_id": casa_id,
+                    "status": "running",
+                    "data_inicio": data_inicio.isoformat(),
+                    "data_fim": data_fim.isoformat(),
+                }],
+                timeout=30,
+            ),
+            what="start_run",
         )
         if resp.status_code >= 300:
             logger.warning("start_run falhou: %s", resp.text[:200])
