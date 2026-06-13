@@ -4,8 +4,9 @@
 **Órgão destinatário:** Câmara dos Deputados — Ouvidoria / SIC
 **Portal:** https://www.camara.leg.br/ouvidoria/faleconosco
 **Base legal:** Lei nº 12.527/2011, art. 10
-**Data de envio:** 06 de junho de 2026
-**Prazo:** 20 dias úteis
+**Data de envio:** 12 de junho de 2026
+**Número de protocolo:** 2026061200000106
+**Prazo:** 20 dias úteis (resposta esperada até ~09/07/2026)
 
 ---
 
