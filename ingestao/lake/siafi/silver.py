@@ -26,6 +26,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 from datetime import date
 from pathlib import Path
 from typing import Iterable, Optional
@@ -34,7 +35,9 @@ import requests
 
 logger = logging.getLogger("siafi.silver")
 
-CHUNK_SIZE = 500
+CHUNK_SIZE = 200
+UPSERT_TIMEOUT_S = 180
+UPSERT_MAX_RETRIES = 3
 LAKE_ROOT = Path(os.getenv("LOCAL_LAKE_ROOT", "/tmp/brinsider-lake"))
 
 
@@ -98,20 +101,48 @@ class SupabaseUpsert:
         }
 
     def upsert(self, table: str, rows: list[dict], on_conflict: str) -> int:
-        """UPSERT em chunks. Retorna número total de linhas enviadas."""
+        """UPSERT em chunks com retry exponencial em timeout/5xx."""
         if not rows:
             return 0
         url = f"{self.base}/{table}?on_conflict={on_conflict}"
         sent = 0
         for i in range(0, len(rows), CHUNK_SIZE):
             chunk = rows[i : i + CHUNK_SIZE]
-            response = requests.post(url, headers=self.headers, json=chunk, timeout=60)
-            if response.status_code >= 400:
-                logger.error(
-                    "UPSERT %s falhou (%d): %s",
-                    table, response.status_code, response.text[:500],
-                )
-                response.raise_for_status()
+            for attempt in range(1, UPSERT_MAX_RETRIES + 1):
+                try:
+                    response = requests.post(
+                        url, headers=self.headers, json=chunk, timeout=UPSERT_TIMEOUT_S
+                    )
+                except requests.exceptions.Timeout:
+                    if attempt == UPSERT_MAX_RETRIES:
+                        logger.error(
+                            "UPSERT %s timeout final após %d tentativas (chunk i=%d, size=%d)",
+                            table, UPSERT_MAX_RETRIES, i, len(chunk),
+                        )
+                        raise
+                    backoff = 2 ** attempt
+                    logger.warning(
+                        "UPSERT %s timeout (chunk i=%d, tentativa %d/%d) — retry em %ds",
+                        table, i, attempt, UPSERT_MAX_RETRIES, backoff,
+                    )
+                    time.sleep(backoff)
+                    continue
+                if response.status_code >= 500 and attempt < UPSERT_MAX_RETRIES:
+                    backoff = 2 ** attempt
+                    logger.warning(
+                        "UPSERT %s %d (chunk i=%d, tentativa %d/%d) — retry em %ds: %s",
+                        table, response.status_code, i, attempt,
+                        UPSERT_MAX_RETRIES, backoff, response.text[:200],
+                    )
+                    time.sleep(backoff)
+                    continue
+                if response.status_code >= 400:
+                    logger.error(
+                        "UPSERT %s falhou (%d): %s",
+                        table, response.status_code, response.text[:500],
+                    )
+                    response.raise_for_status()
+                break
             sent += len(chunk)
         logger.info("Upserted %d rows in %s", sent, table)
         return sent
@@ -328,10 +359,23 @@ def load_liquidacao(parquet_path: Path, snapshot_date: date) -> list[dict]:
     """)
 
 
-def load_item_empenho(parquet_path: Path, snapshot_date: date) -> list[dict]:
+def load_item_empenho(
+    parquet_path: Path,
+    snapshot_date: date,
+    empenho_parquet: Optional[Path] = None,
+) -> list[dict]:
     # Dedup: mesmo (id_empenho, sequencial) pode aparecer múltiplas vezes.
     # Mantemos a linha com maior valor_atual (estado mais recente do item).
-    return _duckdb_rows(f"""
+    # Se empenho_parquet for fornecido, descartamos itens órfãos (id_empenho
+    # ausente no parquet de empenho do mesmo snapshot) — protege a FK NOT NULL
+    # `siafi_item_empenho.id_empenho → siafi_empenho.id_empenho`. O Portal
+    # ocasionalmente publica itens cujo empenho-cabeçalho não vem no mesmo dia.
+    fk_filter = (
+        f"WHERE id_empenho IN (SELECT DISTINCT id_empenho FROM read_parquet('{empenho_parquet}'))"
+        if empenho_parquet is not None
+        else ""
+    )
+    rows = _duckdb_rows(f"""
         SELECT
           id_empenho, sequencial, codigo_empenho,
           cod_categoria_despesa, categoria_despesa,
@@ -347,11 +391,23 @@ def load_item_empenho(parquet_path: Path, snapshot_date: date) -> list[dict]:
           '{snapshot_date.isoformat()}'::DATE AS snapshot_date,
           NULLIF(_source_last_modified, '') AS source_last_modified
         FROM read_parquet('{parquet_path}')
+        {fk_filter}
         QUALIFY ROW_NUMBER() OVER (
           PARTITION BY id_empenho, sequencial
           ORDER BY {_brl_to_numeric('valor_atual')} DESC NULLS LAST
         ) = 1
     """)
+    if empenho_parquet is not None:
+        total_in = _duckdb_rows(
+            f"SELECT COUNT(*) AS n FROM read_parquet('{parquet_path}')"
+        )[0]["n"]
+        descartados = total_in - len(rows)
+        if descartados > 0:
+            logger.warning(
+                "item_empenho: %d linhas descartadas por FK órfã em siafi_empenho (de %d totais)",
+                descartados, total_in,
+            )
+    return rows
 
 
 def load_pagamento_empenho(parquet_path: Path, snapshot_date: date) -> list[dict]:
@@ -466,10 +522,16 @@ def silver_snapshot(snapshot_date: date, lake_root: Path = LAKE_ROOT) -> None:
         upserter.upsert("siafi_liquidacao", load_liquidacao(pq_liquidacao, snapshot_date),
                         on_conflict="codigo_liquidacao")
 
-    # 3. Item empenho (FK→empenho)
+    # 3. Item empenho (FK→empenho) — filtra órfãos vs o parquet de empenho do dia.
     if pq_item_empenho.exists():
-        upserter.upsert("siafi_item_empenho", load_item_empenho(pq_item_empenho, snapshot_date),
-                        on_conflict="id_empenho,sequencial")
+        upserter.upsert(
+            "siafi_item_empenho",
+            load_item_empenho(
+                pq_item_empenho, snapshot_date,
+                empenho_parquet=pq_empenho if pq_empenho.exists() else None,
+            ),
+            on_conflict="id_empenho,sequencial",
+        )
 
     # 4. Junctions
     if pq_pag_emp.exists():
