@@ -31,12 +31,18 @@ from datetime import date
 from pathlib import Path
 from typing import Iterable, Optional
 
+import socket
+
 import requests
+
+# Hard limit em operações TCP — mata conexões penduradas que requests não detecta
+socket.setdefaulttimeout(120)
 
 logger = logging.getLogger("siafi.silver")
 
-CHUNK_SIZE = 200
-UPSERT_TIMEOUT_S = 180
+CHUNK_SIZE = 20
+CHUNK_SLEEP_S = 0.1          # pausa entre chunks pra não saturar conexão Supabase
+UPSERT_TIMEOUT_S = (30, 90)  # (connect_timeout, read_timeout) em segundos
 UPSERT_MAX_RETRIES = 3
 LAKE_ROOT = Path(os.getenv("LOCAL_LAKE_ROOT", "/tmp/brinsider-lake"))
 
@@ -144,6 +150,7 @@ class SupabaseUpsert:
                     response.raise_for_status()
                 break
             sent += len(chunk)
+            time.sleep(CHUNK_SLEEP_S)
         logger.info("Upserted %d rows in %s", sent, table)
         return sent
 
