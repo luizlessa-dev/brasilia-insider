@@ -174,10 +174,21 @@ def _parse_float(v: str | None) -> Optional[float]:
 
 
 def _cpf(v: str | None) -> Optional[str]:
-    """Remove formatação e retorna só dígitos; None se vazio ou #NE#."""
+    """Remove formatação e retorna só dígitos; None se vazio, #NE#/#NULO# ou
+    sentinela negativo do TSE (-1/-3/-4 = não divulgável/não aplicável).
+
+    ATENÇÃO: `re.sub(r"\\D", "", "-4")` retornaria "4" — sem a guarda abaixo,
+    todos os CPFs não-divulgados colapsariam no mesmo valor "4" e formariam um
+    supergrupo falso ao agregar por CPF. Por isso negativos e comprimentos não
+    canônicos (≠ 11 dígitos CPF / 14 CNPJ) viram None.
+    """
     if not v or not v.strip() or v.strip() in ("#NE#", "#NULO#", ""):
         return None
-    return re.sub(r"\D", "", v.strip()) or None
+    s = v.strip()
+    if s.startswith("-"):
+        return None
+    d = re.sub(r"\D", "", s)
+    return d if len(d) >= 11 else None   # CPF=11, CNPJ=14; < 11 é sentinela/lixo
 
 
 def _build_session() -> requests.Session:
