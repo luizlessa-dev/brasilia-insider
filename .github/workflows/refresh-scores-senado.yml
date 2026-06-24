@@ -1,0 +1,39 @@
+name: Refresh Scores Senado
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Toda segunda-feira às 07:00 UTC (04:00 BRT)
+    - cron: "0 7 * * 1"
+
+jobs:
+  proposicoes:
+    name: Ingerir proposições dos senadores
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Ingerir autorias (sen_proposicoes)
+        run: node scripts/ingest-sen-proposicoes.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+  scores:
+    name: Calcular score G5 dos senadores
+    needs: proposicoes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Calcular sen_parlamentar_risco
+        run: node scripts/calc-sen-risco.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
