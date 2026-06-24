@@ -46,7 +46,7 @@ logging.basicConfig(
 logger = logging.getLogger("pgfn_seeder")
 
 BASE_URL = "https://dadosabertos.pgfn.gov.br"
-BATCH_SIZE = 1_000
+BATCH_SIZE = 300  # menor batch evita timeout de 60s do Supabase REST
 
 
 def _upsert_pgfn(rows: list[dict]) -> None:
