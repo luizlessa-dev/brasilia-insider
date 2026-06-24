@@ -64,10 +64,24 @@ def upsert(table: str, rows: list[dict]) -> None:
     chunk = 500
     for i in range(0, len(rows), chunk):
         batch = [_jsonable(r) for r in rows[i : i + chunk]]
-        resp = requests.post(url, json=batch, headers=_supabase_headers(), timeout=30)
-        if not resp.ok:
-            logger.error("upsert %s falhou: %s %s", table, resp.status_code, resp.text[:300])
-            resp.raise_for_status()
+        for attempt in range(5):
+            try:
+                resp = requests.post(url, json=batch, headers=_supabase_headers(), timeout=60)
+                if resp.ok:
+                    break
+                if resp.status_code in (429, 503):
+                    wait = 2 ** attempt
+                    logger.warning("upsert %s: %s — retry em %ds", table, resp.status_code, wait)
+                    time.sleep(wait)
+                    continue
+                logger.error("upsert %s falhou: %s %s", table, resp.status_code, resp.text[:300])
+                resp.raise_for_status()
+            except requests.exceptions.ConnectionError as e:
+                wait = 2 ** attempt
+                logger.warning("upsert %s: conexão perdida (%s) — retry em %ds", table, e, wait)
+                time.sleep(wait)
+        else:
+            raise RuntimeError(f"upsert {table}: falhou após 5 tentativas")
     logger.info("upsert %s: %d linhas", table, len(rows))
 
 
