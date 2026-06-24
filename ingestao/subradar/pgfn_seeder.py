@@ -36,7 +36,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from ingestao.subradar.base import SUPABASE_URL, SUPABASE_KEY, upsert, _supabase_headers
+from ingestao.subradar.base import SUPABASE_URL, SUPABASE_KEY, _supabase_headers, _jsonable
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +47,39 @@ logger = logging.getLogger("pgfn_seeder")
 
 BASE_URL = "https://dadosabertos.pgfn.gov.br"
 BATCH_SIZE = 1_000
+
+
+def _upsert_pgfn(rows: list[dict]) -> None:
+    """Upsert específico para pgfn_divida_ativa com coluna de conflito explícita."""
+    if not rows or not SUPABASE_URL or not SUPABASE_KEY:
+        return
+    url = f"{SUPABASE_URL}/rest/v1/pgfn_divida_ativa"
+    # on_conflict instrui o PostgREST a fazer DO NOTHING na constraint unique
+    params = {"on_conflict": "numero_inscricao,ciclo"}
+    headers = {
+        **_supabase_headers(),
+        "Prefer": "resolution=ignore-duplicates,return=minimal",
+    }
+    batch = [_jsonable(r) for r in rows]
+    for attempt in range(5):
+        try:
+            resp = requests.post(url, json=batch, headers=headers, params=params, timeout=60)
+            if resp.ok:
+                return
+            if resp.status_code in (409, 429, 503):
+                import time
+                wait = 2 ** attempt
+                logger.warning("upsert pgfn: %s — retry em %ds", resp.status_code, wait)
+                time.sleep(wait)
+                continue
+            logger.error("upsert pgfn falhou: %s %s", resp.status_code, resp.text[:300])
+            resp.raise_for_status()
+        except requests.exceptions.ConnectionError as e:
+            import time
+            wait = 2 ** attempt
+            logger.warning("upsert pgfn: conexão perdida — retry em %ds", wait)
+            time.sleep(wait)
+    raise RuntimeError("upsert pgfn_divida_ativa: falhou após 5 tentativas")
 
 ARQUIVOS = {
     "previdenciario":    "Dados_abertos_Previdenciario.zip",
@@ -147,13 +180,13 @@ def seed_arquivo(ciclo: str, tipo: str) -> int:
                     if d:
                         batch.append(d)
                     if len(batch) >= BATCH_SIZE:
-                        upsert("pgfn_divida_ativa", batch)
+                        _upsert_pgfn(batch)
                         linhas_inseridas += len(batch)
                         batch = []
                         if linhas_inseridas % 50_000 == 0:
                             logger.info("  ... %d linhas inseridas", linhas_inseridas)
                 if batch:
-                    upsert("pgfn_divida_ativa", batch)
+                    _upsert_pgfn(batch)
                     linhas_inseridas += len(batch)
 
     tmp_path.unlink(missing_ok=True)
