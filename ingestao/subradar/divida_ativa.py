@@ -1,35 +1,22 @@
 """
-Conector: Dívida Ativa da União — Portal da Transparência
+Conector: Dívida Ativa da União — consulta na tabela interna pgfn_divida_ativa
 
-API: https://api.portaldatransparencia.gov.br/api-de-dados/devedores-uniao
-Auth: chave-api-dados header (nível 2 do Portal da Transparência)
+A tabela é alimentada trimestralmente pelo pgfn_seeder.py, que baixa
+os ZIPs de https://dadosabertos.pgfn.gov.br/ e os insere no Supabase.
 
-ATENÇÃO: o endpoint devedores-uniao requer chave com acesso nível 2.
-Solicite em https://portaldatransparencia.gov.br/api-de-dados/cadastro-usuario
-e defina PORTAL_TP_KEY_NIVEL2 no .env quando receber.
-
-Enquanto a chave não estiver disponível, o conector retorna lista vazia
-(não falha o pipeline).
-
-Tabela: sub_alertas (categoria='divida', fonte='pgfn')
+Este conector lê localmente (sem chamadas externas) e gera alertas
+quando o CNPJ aparece como devedor, com severidade por valor e ajuizamento.
 """
 from __future__ import annotations
 
 import logging
-import os
 import re
 
-from .base import SubradarSource, snapshot_changed, upsert, _ciclo_atual
+import requests
+
+from .base import SubradarSource, snapshot_changed, upsert, _ciclo_atual, SUPABASE_URL, SUPABASE_KEY, _supabase_headers
 
 logger = logging.getLogger("subradar.divida_ativa")
-
-PT_BASE = "https://api.portaldatransparencia.gov.br/api-de-dados"
-# Usa key nível 2 se disponível, senão tenta a key padrão do pipeline
-PT_KEY = (
-    os.environ.get("PORTAL_TP_KEY_NIVEL2")
-    or os.environ.get("PORTAL_TRANSPARENCIA_API_KEY")
-    or ""
-)
 
 
 def _strip_cnpj(cnpj: str) -> str:
@@ -41,62 +28,76 @@ def _fmt_cnpj(cnpj: str) -> str:
     return f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:14]}" if len(c) == 14 else cnpj
 
 
+def _query_pgfn(cnpj: str) -> list[dict]:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    url = f"{SUPABASE_URL}/rest/v1/pgfn_divida_ativa"
+    params = {
+        "cpf_cnpj": f"eq.{cnpj}",
+        "select": "situacao,tipo_credito,valor_consolidado,indicador_ajuizado,arquivo,ciclo,nome_devedor",
+        "order": "valor_consolidado.desc",
+        "limit": 200,
+    }
+    r = requests.get(url, params=params, headers=_supabase_headers(), timeout=20)
+    if not r.ok:
+        logger.warning("Query pgfn_divida_ativa falhou: %s", r.text[:200])
+        return []
+    return r.json() if isinstance(r.json(), list) else []
+
+
 class DividaAtivaConnector(SubradarSource):
     fonte = "pgfn"
-    base_url = PT_BASE
-
-    def _headers(self) -> dict:
-        return {"chave-api-dados": PT_KEY, "Accept": "application/json"}
+    base_url = SUPABASE_URL or ""
 
     def consultar_cnpj(self, cnpj: str) -> list[dict]:
         cnpj_limpo = _strip_cnpj(cnpj)
         cnpj_fmt = _fmt_cnpj(cnpj_limpo)
         ciclo = _ciclo_atual()
 
-        if not PT_KEY:
-            logger.warning("PGFN: PORTAL_TP_KEY_NIVEL2 não configurada — pulando %s", cnpj_fmt)
-            return []
+        registros = _query_pgfn(cnpj_limpo)
 
-        try:
-            url = f"{PT_BASE}/devedores-uniao"
-            data = self._get(url, params={"cnpj": cnpj_limpo, "pagina": 1}, headers=self._headers())
-        except Exception as e:
-            logger.warning("PGFN: erro ao consultar %s — %s", cnpj_fmt, e)
-            return []
-
-        registros = data if isinstance(data, list) else data.get("data", [])
-        mudou, hash_novo = snapshot_changed(cnpj_fmt, self.fonte, ciclo, registros)
+        resumo = {"total": len(registros)}
+        mudou, hash_novo = snapshot_changed(cnpj_fmt, self.fonte, ciclo, resumo)
         if not mudou:
             return []
 
         upsert("sub_snapshots", [{
             "cnpj": cnpj_fmt, "fonte": self.fonte, "ciclo": ciclo,
-            "hash_dados": hash_novo, "dados": {"total": len(registros)},
+            "hash_dados": hash_novo, "dados": resumo,
         }])
 
         alertas = []
+
         if not registros:
             alertas.append({
                 "cnpj": cnpj_fmt, "ciclo": ciclo, "fonte": self.fonte,
                 "categoria": "divida", "severidade": "ok",
-                "titulo": "Sem dívida ativa registrada (PGFN)",
-                "descricao": "CNPJ não encontrado na base de devedores da União.",
+                "titulo": "Sem dívida ativa na PGFN",
+                "descricao": "CNPJ não encontrado na base de devedores da União (PGFN).",
                 "is_novo": True,
             })
         else:
-            valor_total = sum(float(r.get("valorConsolidado") or 0) for r in registros)
-            severidade = "critico" if valor_total > 1_000_000 else "atencao"
+            valor_total = sum(float(r.get("valor_consolidado") or 0) for r in registros)
+            ajuizados = [r for r in registros if (r.get("indicador_ajuizado") or "").upper() == "SIM"]
+            ciclo_pgfn = registros[0].get("ciclo", "N/D")
+
+            severidade = "critico" if (valor_total > 1_000_000 or ajuizados) else "atencao"
+
+            descricao = (
+                f"CNPJ inscrito em dívida ativa da União (PGFN). "
+                f"{len(registros)} inscrição(ões), valor total R$ {valor_total:,.2f}."
+            )
+            if ajuizados:
+                descricao += f" {len(ajuizados)} débito(s) ajuizado(s) (execução fiscal em andamento)."
+
             alertas.append({
                 "cnpj": cnpj_fmt, "ciclo": ciclo, "fonte": self.fonte,
                 "categoria": "divida", "severidade": severidade,
-                "titulo": f"Dívida ativa na União — R$ {valor_total:,.2f} ({len(registros)} débito(s))",
-                "descricao": (
-                    f"CNPJ inscrito em dívida ativa da União (PGFN). "
-                    f"{len(registros)} débito(s) ativo(s), total R$ {valor_total:,.2f}."
-                ),
+                "titulo": f"Dívida ativa na União — R$ {valor_total:,.2f} ({len(registros)} inscrição(ões))",
+                "descricao": descricao,
                 "valor_brl": valor_total,
                 "contraparte": "PGFN / Receita Federal",
-                "url_fonte": f"https://www.regularize.pgfn.gov.br/situacao/{cnpj_limpo}",
+                "url_fonte": f"https://www.regularize.pgfn.gov.br/",
                 "is_novo": True,
             })
 
