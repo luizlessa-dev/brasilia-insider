@@ -69,11 +69,11 @@ class OpenSanctionsConnector(SubradarSource):
             h["Authorization"] = f"ApiKey {OS_KEY}"
         return h
 
-    def _search(self, query: str, schema: str = "Company") -> list[dict]:
+    def _search(self, query: str, schema: str = "Company", dataset: str = "default") -> list[dict]:
         """Busca entidade por nome/número na base global."""
         try:
             r = self._session.get(
-                f"{OS_BASE}/entities/",
+                f"{OS_BASE}/search/{dataset}",
                 params={"q": query, "schema": schema, "limit": 10},
                 headers=self._headers(),
                 timeout=self.timeout,
@@ -88,7 +88,7 @@ class OpenSanctionsConnector(SubradarSource):
         """Busca entidade por ID direto."""
         try:
             r = self._session.get(
-                f"{OS_BASE}/entities/{entity_id}",
+                f"{OS_BASE}/entities/{entity_id}/",
                 headers=self._headers(),
                 timeout=self.timeout,
             )
@@ -116,6 +116,16 @@ class OpenSanctionsConnector(SubradarSource):
         cnpj_fmt = _fmt_cnpj(cnpj_limpo)
         ciclo = _ciclo_atual()
         alertas = []
+
+        # Filtro de elegibilidade: só consulta quando há sinais de risco internacional
+        # Reduz custo da API (€0.10/consulta após trial)
+        try:
+            from .societario import SocietarioConnector
+            if not SocietarioConnector().e_risco_internacional(cnpj_limpo):
+                logger.debug("OpenSanctions: %s sem sinais de risco internacional — pulando", cnpj_fmt)
+                return []
+        except Exception:
+            pass  # Se falhar na verificação, consulta mesmo assim
 
         # Busca pelo número do CNPJ diretamente
         resultados = self._search(cnpj_limpo, schema="Company")

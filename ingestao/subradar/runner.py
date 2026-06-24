@@ -25,6 +25,8 @@ from .base import SUPABASE_URL, SUPABASE_KEY, upsert, _supabase_headers
 from .divida_ativa import DividaAtivaConnector
 from .bndes import BNDESConnector
 from .opensanctions import OpenSanctionsConnector
+from .leniencia import LenienciaConnector
+from .societario import SocietarioConnector
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,9 +36,11 @@ logging.basicConfig(
 logger = logging.getLogger("subradar.runner")
 
 FONTES = [
-    DividaAtivaConnector(),
-    BNDESConnector(),
-    OpenSanctionsConnector(),
+    DividaAtivaConnector(),    # pgfn — dívida ativa (tabela local)
+    BNDESConnector(),          # pncp + emendas (tabela interna BR Insider)
+    LenienciaConnector(),      # acordos de leniência (Portal Transparência)
+    SocietarioConnector(),     # qsa + capital social (rfb interno)
+    OpenSanctionsConnector(),  # sanções internacionais (só com sócio estrangeiro)
 ]
 
 
